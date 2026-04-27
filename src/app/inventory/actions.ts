@@ -2,6 +2,12 @@
 
 import { supabase } from '@/lib/supabase'
 import { revalidatePath } from 'next/cache'
+import { getSession } from '@/lib/auth'
+
+export async function getCurrentUserRole() {
+  const session = await getSession();
+  return session?.role || 'subadmin';
+}
 
 export async function addAsset(data: any) {
   // Check for unique serial number
@@ -149,6 +155,11 @@ export async function importAssetsFromCSV(assets: any[]) {
 }
 
 export async function deleteAsset(id: string) {
+  const session = await getSession();
+  if (session?.role !== 'superadmin') {
+    return { success: false, error: 'Unauthorized: Only Super Admins can delete assets.' }
+  }
+
   const { error } = await supabase.from('assets').delete().eq('id', id)
   
   if (error) {

@@ -15,11 +15,17 @@ export default function AssetPassportPage({ params }: { params: Promise<{ id: st
   const router = useRouter();
   const [asset, setAsset] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [userRole, setUserRole] = useState<string>('subadmin');
 
   useEffect(() => {
     async function loadData() {
       const data = await getAsset(resolvedParams.id);
       setAsset(data);
+      
+      const { getCurrentUserRole } = await import('../actions');
+      const role = await getCurrentUserRole();
+      setUserRole(role);
+      
       setIsLoading(false);
     }
     loadData();
@@ -67,10 +73,12 @@ export default function AssetPassportPage({ params }: { params: Promise<{ id: st
           </div>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" className="gap-2 text-destructive border-destructive/20 hover:bg-destructive/10" onClick={handleDelete}>
-            <Trash2 className="h-4 w-4" />
-            Delete
-          </Button>
+          {userRole === 'superadmin' && (
+            <Button variant="outline" className="gap-2 text-destructive border-destructive/20 hover:bg-destructive/10" onClick={handleDelete}>
+              <Trash2 className="h-4 w-4" />
+              Delete
+            </Button>
+          )}
           <Link href={`/inventory/${resolvedParams.id}/edit`} className={buttonVariants({ variant: "default", className: "gap-2" })}>
             <Edit className="h-4 w-4" />
             Edit Asset

@@ -1,12 +1,15 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { LayoutDashboard, PackagePlus, List, Settings, Laptop } from 'lucide-react';
+import { usePathname, useRouter } from 'next/navigation';
+import { LayoutDashboard, PackagePlus, List, Settings, Laptop, Users, LogOut } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { logout } from '@/app/login/actions';
+import { Button } from '@/components/ui/button';
 
-export function Sidebar() {
+export function Sidebar({ userRole }: { userRole?: string }) {
   const pathname = usePathname();
+  const router = useRouter();
 
   const links = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -14,6 +17,15 @@ export function Sidebar() {
     { name: 'Add Asset', href: '/inventory/add', icon: PackagePlus },
     { name: 'Settings', href: '/settings', icon: Settings },
   ];
+
+  if (userRole === 'superadmin') {
+    links.push({ name: 'Users', href: '/users', icon: Users });
+  }
+
+  const handleLogout = async () => {
+    await logout();
+    router.push('/login');
+  };
 
   return (
     <aside className="w-64 h-screen bg-white border-r border-border flex flex-col fixed left-0 top-0 z-50 shadow-sm">
@@ -50,8 +62,15 @@ export function Sidebar() {
         })}
       </nav>
       
-      <div className="p-4 border-t border-border/50 text-xs text-center text-muted-foreground">
-        &copy; {new Date().getFullYear()} Taj Gasoline
+      <div className="p-4 border-t border-border/50">
+        <Button 
+          variant="ghost" 
+          className="w-full justify-start text-muted-foreground hover:text-destructive hover:bg-destructive/10" 
+          onClick={handleLogout}
+        >
+          <LogOut className="mr-2 h-4 w-4" />
+          Sign Out
+        </Button>
       </div>
     </aside>
   );

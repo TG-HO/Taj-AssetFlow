@@ -14,18 +14,27 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Search, Plus, FileUp, Eye, Edit, Trash2 } from "lucide-react";
+import { Search, Plus, FileUp, FileDown, Eye, Edit, Trash2 } from "lucide-react";
 import { deleteAsset } from './actions';
 
 export default function InventoryPage() {
   const [search, setSearch] = useState('');
   const [inventory, setInventory] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
+  const [userRole, setUserRole] = useState<string>('subadmin');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchInventory();
+    fetchUserRole();
   }, []);
+
+  const fetchUserRole = async () => {
+    const { getCurrentUserRole } = await import('./actions');
+    const role = await getCurrentUserRole();
+    setUserRole(role);
+  };
 
   const fetchInventory = async () => {
     setIsLoading(true);
@@ -37,7 +46,8 @@ export default function InventoryPage() {
         serialNumber: item.serial_number,
         assignedTo: item.assigned_to || 'Unassigned',
         location: item.location,
-        status: item.status
+        status: item.status,
+        issueDate: item.issue_date
       })));
     }
     setIsLoading(false);
@@ -180,6 +190,62 @@ export default function InventoryPage() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  const handleExportToExcel = async () => {
+    setIsExporting(true);
+    try {
+      const { data, error } = await supabase.from('assets').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      
+      if (!data || data.length === 0) {
+        alert("No assets found to export.");
+        setIsExporting(false);
+        return;
+      }
+
+      const headers = ['Laptop Name', 'Serial Number', 'RAM', 'Storage Type', 'Storage Capacity', 'Assigned To', 'Location', 'Status', 'Old Username', 'Purchase Date', 'Issue Date', 'Details'];
+      
+      const csvContent = [
+        headers.join(','),
+        ...data.map(item => [
+          `"${item.laptop_name || ''}"`,
+          `"${item.serial_number || ''}"`,
+          `"${item.ram || ''}"`,
+          `"${item.storage_type || ''}"`,
+          `"${item.storage_capacity || ''}"`,
+          `"${item.assigned_to || ''}"`,
+          `"${item.location || ''}"`,
+          `"${item.status || ''}"`,
+          `"${item.old_username || ''}"`,
+          `"${item.purchase_date || ''}"`,
+          `"${item.issue_date || ''}"`,
+          `"${(item.details || '').replace(/"/g, '""')}"`
+        ].join(','))
+      ].join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `Taj_AssetFlow_Inventory_${new Date().toISOString().split('T')[0]}.csv`); 
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err: any) {
+      alert("Error exporting data: " + err.message);
+    }
+    setIsExporting(false);
+  };
+
+  const calculateDuration = (issueDate: string | null) => {
+    if (!issueDate) return '-';
+    const issue = new Date(issueDate);
+    const now = new Date();
+    let diff = (now.getTime() - issue.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
+    if (diff < 0) return '-';
+    if (diff < 1) return '< 1 yr';
+    return `${diff.toFixed(1)} yrs`;
+  };
+
   const handleDelete = async (id: string) => {
     if (window.confirm("Are you sure you want to delete this asset?")) {
       const result = await deleteAsset(id);
@@ -212,9 +278,13 @@ export default function InventoryPage() {
             onChange={handleImportCSV} 
             className="hidden" 
           />
-          <Button variant="outline" className="gap-2" onClick={() => fileInputRef.current?.click()}>
+          <Button variant="outline" className="gap-2 bg-background hover:bg-muted" onClick={() => fileInputRef.current?.click()}>
             <FileUp className="h-4 w-4" />
             Import CSV
+          </Button>
+          <Button variant="outline" className="gap-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-200" onClick={handleExportToExcel} disabled={isExporting}>
+            <FileDown className="h-4 w-4" />
+            {isExporting ? 'Exporting...' : 'Export to Excel'}
           </Button>
           <Link href="/inventory/add" className={buttonVariants({ variant: "default", className: "gap-2" })}>
             <Plus className="h-4 w-4" />
@@ -240,10 +310,11 @@ export default function InventoryPage() {
           <TableHeader>
             <TableRow>
               <TableHead className="w-[15%] font-semibold">Serial Number</TableHead>
-              <TableHead className="w-[20%] font-semibold">Laptop Name</TableHead>
-              <TableHead className="w-[20%] font-semibold">User</TableHead>
-              <TableHead className="w-[20%] font-semibold">Location</TableHead>
+              <TableHead className="w-[18%] font-semibold">Laptop Name</TableHead>
+              <TableHead className="w-[15%] font-semibold">User</TableHead>
+              <TableHead className="w-[15%] font-semibold">Location</TableHead>
               <TableHead className="w-[12%] font-semibold">Status</TableHead>
+              <TableHead className="w-[12%] font-semibold">Duration</TableHead>
               <TableHead className="w-[13%] text-right font-semibold">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -276,6 +347,9 @@ export default function InventoryPage() {
                       {item.status}
                     </Badge>
                   </TableCell>
+                  <TableCell>
+                    <span className="text-sm font-medium text-muted-foreground">{calculateDuration(item.issueDate)}</span>
+                  </TableCell>
                   <TableCell className="text-right flex justify-end gap-1 overflow-hidden">
                     <Link href={`/inventory/${item.id}`} className={buttonVariants({ variant: "ghost", size: "icon" })}>
                       <Eye className="h-4 w-4" />
@@ -285,10 +359,12 @@ export default function InventoryPage() {
                       <Edit className="h-4 w-4" />
                       <span className="sr-only">Edit</span>
                     </Link>
-                    <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleDelete(item.id)}>
-                      <Trash2 className="h-4 w-4" />
-                      <span className="sr-only">Delete</span>
-                    </Button>
+                    {userRole === 'superadmin' && (
+                      <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleDelete(item.id)}>
+                        <Trash2 className="h-4 w-4" />
+                        <span className="sr-only">Delete</span>
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))
