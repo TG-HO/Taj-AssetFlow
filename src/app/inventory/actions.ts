@@ -9,6 +9,19 @@ export async function getCurrentUserRole() {
   return session?.role || 'subadmin';
 }
 
+async function logAdminAction(action: string, targetSerialNumber: string | null, details: any, changes?: any) {
+  const session = await getSession();
+  const username = session?.username || 'System';
+  
+  await supabase.from('admin_logs').insert({
+    action,
+    performed_by: username,
+    target_serial_number: targetSerialNumber,
+    details,
+    changes
+  });
+}
+
 export async function addAsset(data: any) {
   // Check for unique serial number
   const { data: existing } = await supabase
@@ -43,6 +56,8 @@ export async function addAsset(data: any) {
     return { success: false, error: error.message }
   }
 
+  await logAdminAction('ADD_ASSET', data.serialNumber, data);
+
   revalidatePath('/inventory')
   return { success: true }
 }
@@ -58,6 +73,40 @@ export async function updateAsset(id: string, data: any) {
 
   if (existing) {
     return { success: false, error: 'Serial number already exists' }
+  }
+
+  // Get old asset to compare changes
+  const { data: oldAsset } = await supabase.from('assets').select('*').eq('id', id).single();
+  let changes: any = null;
+
+  if (oldAsset) {
+    changes = {};
+    const keysMap = [
+      ['laptop_name', 'laptopName'],
+      ['serial_number', 'serialNumber'],
+      ['ram', 'ram'],
+      ['storage_type', 'storageType'],
+      ['storage_capacity', 'storageCapacity'],
+      ['assigned_to', 'assignedTo'],
+      ['location', 'location'],
+      ['status', 'status'],
+      ['old_username', 'oldUsername'],
+      ['purchase_date', 'purchaseDate'],
+      ['issue_date', 'issueDate'],
+      ['details', 'details']
+    ];
+    
+    let hasChanges = false;
+    for (const [dbKey, dataKey] of keysMap) {
+      // Normalize values to avoid false positives on null vs empty string vs undefined
+      const oldVal = oldAsset[dbKey] ?? null;
+      const newVal = data[dataKey] ?? null;
+      if (oldVal !== newVal) {
+        changes[dbKey] = { old: oldVal, new: newVal };
+        hasChanges = true;
+      }
+    }
+    if (!hasChanges) changes = null;
   }
 
   const { error } = await supabase.from('assets').update({
@@ -81,6 +130,8 @@ export async function updateAsset(id: string, data: any) {
     }
     return { success: false, error: error.message }
   }
+
+  await logAdminAction('UPDATE_ASSET', data.serialNumber, data, changes);
 
   revalidatePath('/inventory')
   revalidatePath(`/inventory/${id}`)
@@ -150,6 +201,8 @@ export async function importAssetsFromCSV(assets: any[]) {
     return { success: false, error: error.message }
   }
 
+  await logAdminAction('IMPORT_ASSETS', null, { count: uniqueBatch.length, imported_serials: Array.from(existingSerials) });
+
   revalidatePath('/inventory')
   return { success: true }
 }
@@ -160,10 +213,15 @@ export async function deleteAsset(id: string) {
     return { success: false, error: 'Unauthorized: Only Super Admins can delete assets.' }
   }
 
+  const { data: asset } = await supabase.from('assets').select('serial_number').eq('id', id).single();
   const { error } = await supabase.from('assets').delete().eq('id', id)
   
   if (error) {
     return { success: false, error: error.message }
+  }
+
+  if (asset) {
+    await logAdminAction('DELETE_ASSET', asset.serial_number, { id });
   }
 
   revalidatePath('/inventory')

@@ -20,6 +20,7 @@ export function Sidebar({ userRole }: { userRole?: string }) {
 
   if (userRole === 'superadmin') {
     links.push({ name: 'Users', href: '/users', icon: Users });
+    links.push({ name: 'Admin Logs', href: '/admin-logs', icon: List });
   }
 
   const handleLogout = async () => {

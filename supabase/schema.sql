@@ -57,3 +57,18 @@ VALUES
 ('Apple MacBook Pro M1', 'SN-MAC-004', '16GB', 'SSD', '512GB', 'marketing.head', 'Karachi Office', 'New', '2022-08-10'),
 ('Dell OptiPlex 3080', 'SN-DELL-005', '8GB', 'HDD', '1TB', NULL, 'IT Store', 'Refub', '2021-03-12'),
 ('Lenovo IdeaPad 3', 'SN-LEN-006', '4GB', 'HDD', '500GB', 'sales.rep1', 'Multan Office', 'Faulty', '2020-11-25');
+
+-- 6. Create admin_logs table
+CREATE TABLE public.admin_logs (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    action TEXT NOT NULL,
+    performed_by TEXT NOT NULL,
+    target_serial_number TEXT,
+    details JSONB,
+    changes JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.admin_logs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Enable read access for all users" ON public.admin_logs FOR SELECT USING (true);
+CREATE POLICY "Enable insert for all users" ON public.admin_logs FOR INSERT WITH CHECK (true);

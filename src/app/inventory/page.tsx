@@ -14,7 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Search, Plus, FileUp, FileDown, Eye, Edit, Trash2 } from "lucide-react";
+import { Search, Plus, FileUp, FileDown, Eye, Edit, Trash2, ArrowUpDown } from "lucide-react";
 import { deleteAsset } from './actions';
 
 export default function InventoryPage() {
@@ -23,6 +23,7 @@ export default function InventoryPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
   const [userRole, setUserRole] = useState<string>('subadmin');
+  const [sortByDurationAsc, setSortByDurationAsc] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -257,11 +258,28 @@ export default function InventoryPage() {
     }
   };
 
+  const getDurationYears = (issueDate: string | null) => {
+    if (!issueDate) return -1;
+    const issue = new Date(issueDate);
+    const now = new Date();
+    let diff = (now.getTime() - issue.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
+    return diff < 0 ? -1 : diff;
+  };
+
   const filteredInventory = inventory.filter(item => 
     item.serialNumber.toLowerCase().includes(search.toLowerCase()) ||
     item.laptopName.toLowerCase().includes(search.toLowerCase()) ||
     item.assignedTo.toLowerCase().includes(search.toLowerCase())
-  );
+  ).sort((a, b) => {
+    if (sortByDurationAsc) {
+      const durA = getDurationYears(a.issueDate);
+      const durB = getDurationYears(b.issueDate);
+      if (durA === -1 && durB !== -1) return 1;
+      if (durB === -1 && durA !== -1) return -1;
+      return durA - durB;
+    }
+    return 0; // maintain original order (created_at desc) if not sorted by duration
+  });
 
   return (
     <div className="space-y-6">
@@ -293,7 +311,7 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      <div className="flex items-center space-x-2">
+      <div className="flex items-center space-x-2 justify-between">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
@@ -303,6 +321,14 @@ export default function InventoryPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
+        <Button 
+          variant={sortByDurationAsc ? "default" : "outline"}
+          onClick={() => setSortByDurationAsc(!sortByDurationAsc)}
+          className="gap-2"
+        >
+          Sort by Duration {sortByDurationAsc ? '(Asc)' : ''}
+          <ArrowUpDown className="h-4 w-4" />
+        </Button>
       </div>
 
       <div className="rounded-md border bg-card w-full overflow-hidden">
