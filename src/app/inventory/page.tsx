@@ -364,7 +364,7 @@ export default function InventoryPage() {
               <TableHead className="w-[15%] font-semibold">Laptop Name</TableHead>
               <TableHead className="w-[12%] font-semibold">User</TableHead>
               <TableHead className="w-[12%] font-semibold">
-                <Select onValueChange={setLocationFilter} value={locationFilter}>
+                <Select onValueChange={(val) => setLocationFilter(val || 'All')} value={locationFilter}>
                   <SelectTrigger className="border-0 shadow-none bg-transparent p-0 h-auto font-semibold focus:ring-0">
                     <span className="flex items-center gap-1">
                       Location
@@ -380,7 +380,7 @@ export default function InventoryPage() {
                 </Select>
               </TableHead>
               <TableHead className="w-[10%] font-semibold">
-                <Select onValueChange={setStatusFilter} value={statusFilter}>
+                <Select onValueChange={(val) => setStatusFilter(val || 'All')} value={statusFilter}>
                   <SelectTrigger className="border-0 shadow-none bg-transparent p-0 h-auto font-semibold focus:ring-0">
                     <span className="flex items-center gap-1">
                       Status
@@ -396,7 +396,7 @@ export default function InventoryPage() {
                 </Select>
               </TableHead>
               <TableHead className="w-[12%] font-semibold">
-                <Select onValueChange={setDurationSort} value={durationSort}>
+                <Select onValueChange={(val) => setDurationSort(val || 'None')} value={durationSort}>
                   <SelectTrigger className="border-0 shadow-none bg-transparent p-0 h-auto font-semibold focus:ring-0">
                     <span className="flex items-center gap-1">
                       Duration
