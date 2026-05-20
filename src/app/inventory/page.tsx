@@ -15,17 +15,20 @@ import { Input } from "@/components/ui/input";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, Plus, FileUp, FileDown, Eye, Edit, Trash2, ArrowUpDown, Check } from "lucide-react";
+import { Search, Plus, FileUp, FileDown, Eye, Edit, Trash2, ArrowUpDown, Check, ChevronDown } from "lucide-react";
 import { deleteAsset } from './actions';
+import { cn } from "@/lib/utils";
 
 export default function InventoryPage() {
   const [search, setSearch] = useState('');
   const [inventory, setInventory] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
-  const [userRole, setUserRole] = useState<string>('subadmin');
+  const [userRole, setUserRole] = useState<string>('moderator');
   const [statusFilter, setStatusFilter] = useState('All');
   const [locationFilter, setLocationFilter] = useState('All');
+  const [isLocationOpen, setIsLocationOpen] = useState(false);
+  const [locationSearch, setLocationSearch] = useState('');
   const [durationSort, setDurationSort] = useState('None');
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -363,21 +366,80 @@ export default function InventoryPage() {
               <TableHead className="w-[12%] font-semibold">Serial Number</TableHead>
               <TableHead className="w-[15%] font-semibold">Laptop Name</TableHead>
               <TableHead className="w-[12%] font-semibold">User</TableHead>
-              <TableHead className="w-[12%] font-semibold">
-                <Select onValueChange={(val) => setLocationFilter(val || 'All')} value={locationFilter}>
-                  <SelectTrigger className="border-0 shadow-none bg-transparent p-0 h-auto font-semibold focus:ring-0">
-                    <span className="flex items-center gap-1">
-                      Location
-                      {locationFilter !== 'All' && <Check className="h-4 w-4 text-emerald-500" />}
-                    </span>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="All">All Locations</SelectItem>
-                    {uniqueLocations.map(loc => (
-                      <SelectItem key={loc} value={loc}>{loc}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <TableHead className="w-[12%] font-semibold relative">
+                <div className="relative">
+                  <button 
+                    type="button"
+                    onClick={() => setIsLocationOpen(!isLocationOpen)}
+                    className="flex items-center gap-1 hover:text-foreground text-muted-foreground transition-colors font-semibold focus:outline-none"
+                  >
+                    <span>Location</span>
+                    {locationFilter !== 'All' && <Check className="h-3.5 w-3.5 text-emerald-500" />}
+                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                  </button>
+                  
+                  {isLocationOpen && (
+                    <>
+                      {/* Invisible backdrop to close on click outside */}
+                      <div className="fixed inset-0 z-40" onClick={() => { setIsLocationOpen(false); setLocationSearch(''); }} />
+                      
+                      <div className="absolute left-0 mt-2 w-64 rounded-lg border bg-popover text-popover-foreground shadow-md z-50 p-2 space-y-2 font-normal">
+                        <div className="relative">
+                          <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                          <Input 
+                            placeholder="Search locations..." 
+                            value={locationSearch}
+                            onChange={(e) => setLocationSearch(e.target.value)}
+                            className="pl-7 h-8 text-xs focus-visible:ring-primary/50"
+                            autoFocus
+                          />
+                        </div>
+                        <div className="max-h-60 overflow-y-auto space-y-0.5 text-xs">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setLocationFilter('All');
+                              setIsLocationOpen(false);
+                              setLocationSearch('');
+                            }}
+                            className={cn(
+                              "w-full text-left px-2 py-1.5 rounded-md transition-colors flex items-center justify-between",
+                              locationFilter === 'All' ? "bg-accent text-accent-foreground font-semibold" : "hover:bg-muted"
+                            )}
+                          >
+                            <span>All Locations</span>
+                            {locationFilter === 'All' && <Check className="h-3 w-3 text-primary" />}
+                          </button>
+                          
+                          {uniqueLocations
+                            .filter(loc => (loc || '').toLowerCase().includes(locationSearch.toLowerCase()))
+                            .map(loc => (
+                              <button
+                                type="button"
+                                key={loc}
+                                onClick={() => {
+                                  setLocationFilter(loc);
+                                  setIsLocationOpen(false);
+                                  setLocationSearch('');
+                                }}
+                                className={cn(
+                                  "w-full text-left px-2 py-1.5 rounded-md transition-colors flex items-center justify-between truncate",
+                                  locationFilter === loc ? "bg-accent text-accent-foreground font-semibold" : "hover:bg-muted"
+                                )}
+                              >
+                                <span className="truncate">{loc}</span>
+                                {locationFilter === loc && <Check className="h-3 w-3 text-primary" />}
+                              </button>
+                            ))}
+                          
+                          {uniqueLocations.filter(loc => (loc || '').toLowerCase().includes(locationSearch.toLowerCase())).length === 0 && (
+                            <div className="text-muted-foreground text-center py-2">No locations found.</div>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
               </TableHead>
               <TableHead className="w-[10%] font-semibold">
                 <Select onValueChange={(val) => setStatusFilter(val || 'All')} value={statusFilter}>
@@ -460,7 +522,7 @@ export default function InventoryPage() {
                       <Edit className="h-4 w-4" />
                       <span className="sr-only">Edit</span>
                     </Link>
-                    {userRole === 'superadmin' && (
+                    {userRole === 'admin' && (
                       <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleDelete(item.id)}>
                         <Trash2 className="h-4 w-4" />
                         <span className="sr-only">Delete</span>

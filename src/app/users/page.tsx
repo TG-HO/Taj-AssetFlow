@@ -16,7 +16,7 @@ export default function UsersPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState('subadmin');
+  const [role, setRole] = useState('moderator');
   const [isCreating, setIsCreating] = useState(false);
 
   useEffect(() => {
@@ -41,7 +41,7 @@ export default function UsersPage() {
     if (result.success) {
       setUsername('');
       setPassword('');
-      setRole('subadmin');
+      setRole('moderator');
       fetchUsers();
     } else {
       alert(result.error);
@@ -93,8 +93,8 @@ export default function UsersPage() {
                     <SelectValue placeholder="Select role" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="subadmin">Sub-Admin (Read/Write)</SelectItem>
-                    <SelectItem value="superadmin">Super-Admin (Full Access)</SelectItem>
+                    <SelectItem value="moderator">Moderator (Read/Write)</SelectItem>
+                    <SelectItem value="admin">Admin (Full Access)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -140,8 +140,8 @@ export default function UsersPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={user.role === 'superadmin' ? 'default' : 'secondary'} className="gap-1">
-                          {user.role === 'superadmin' && <Shield className="h-3 w-3" />}
+                        <Badge variant={user.role === 'admin' ? 'default' : 'secondary'} className="gap-1">
+                          {user.role === 'admin' && <Shield className="h-3 w-3" />}
                           {user.role}
                         </Badge>
                       </TableCell>

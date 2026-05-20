@@ -8,8 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Bell, Database, Download, Monitor, Shield, User } from "lucide-react";
 import { supabase } from '@/lib/supabase';
+import { useTenantSession } from '@/lib/TenantSessionContext';
 
 export default function SettingsPage() {
+  const { company, profile, isLoading } = useTenantSession();
   const [isExporting, setIsExporting] = useState(false);
 
   const handleExportCSV = async () => {
@@ -100,11 +102,11 @@ export default function SettingsPage() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="org-name">Organization Name</Label>
-                <Input id="org-name" defaultValue="Taj Gasoline" />
+                <Input id="org-name" value={isLoading ? 'Loading...' : (company?.name || 'Unknown Company')} disabled />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="admin-email">Administrator Email</Label>
-                <Input id="admin-email" defaultValue="admin@tajgasoline.com" type="email" />
+                <Label htmlFor="admin-email">User Email</Label>
+                <Input id="admin-email" value={isLoading ? 'Loading...' : (profile?.email || 'Unknown Email')} disabled type="email" />
               </div>
             </CardContent>
             <CardFooter className="border-t px-6 py-4 bg-muted/20">

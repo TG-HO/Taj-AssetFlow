@@ -1,27 +1,17 @@
 'use server'
 
-import { supabase } from '@/lib/supabase'
 import { cookies } from 'next/headers'
 
-export async function login(username: string, password: string) {
+export interface SessionPayload {
+  id: string;
+  username: string;
+  role: string;
+  company_id: string;
+}
+
+export async function createSession(payload: SessionPayload) {
   try {
-    const { data: user, error } = await supabase
-      .from('app_users')
-      .select('*')
-      .eq('username', username)
-      .eq('password', password)
-      .single();
-
-    if (error || !user) {
-      return { success: false, error: 'Invalid username or password' }
-    }
-
-    // Set auth cookie
-    const token = Buffer.from(JSON.stringify({ 
-      id: user.id, 
-      username: user.username, 
-      role: user.role 
-    })).toString('base64');
+    const token = Buffer.from(JSON.stringify(payload)).toString('base64');
     
     const cookieStore = await cookies();
     cookieStore.set('auth_token', token, { 
@@ -32,9 +22,9 @@ export async function login(username: string, password: string) {
       maxAge: 60 * 60 * 24 * 7 // 1 week
     });
 
-    return { success: true }
+    return { success: true };
   } catch (err: any) {
-    return { success: false, error: err.message }
+    return { success: false, error: err.message };
   }
 }
 

@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { LayoutDashboard, PackagePlus, List, Settings, Laptop, Users, LogOut } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { logout } from '@/app/login/actions';
+import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 
 export function Sidebar({ userRole }: { userRole?: string }) {
@@ -18,7 +19,7 @@ export function Sidebar({ userRole }: { userRole?: string }) {
     { name: 'Add Asset', href: '/inventory/add', icon: PackagePlus },
   ];
 
-  if (userRole === 'superadmin') {
+  if (userRole === 'admin') {
     links.push({ name: 'Users', href: '/users', icon: Users });
     links.push({ name: 'Admin Logs', href: '/admin-logs', icon: List });
   }
@@ -27,6 +28,11 @@ export function Sidebar({ userRole }: { userRole?: string }) {
   links.push({ name: 'Settings', href: '/settings', icon: Settings });
 
   const handleLogout = async () => {
+    try {
+      localStorage.removeItem('tenant_session');
+      localStorage.removeItem('tenant_company');
+      await supabase.auth.signOut();
+    } catch (e) {}
     await logout();
     router.push('/login');
   };

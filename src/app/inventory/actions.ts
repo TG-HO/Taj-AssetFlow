@@ -6,7 +6,7 @@ import { getSession } from '@/lib/auth'
 
 export async function getCurrentUserRole() {
   const session = await getSession();
-  return session?.role || 'subadmin';
+  return session?.role || 'moderator';
 }
 
 async function logAdminAction(action: string, targetSerialNumber: string | null, details: any, changes?: any) {
@@ -209,8 +209,8 @@ export async function importAssetsFromCSV(assets: any[]) {
 
 export async function deleteAsset(id: string) {
   const session = await getSession();
-  if (session?.role !== 'superadmin') {
-    return { success: false, error: 'Unauthorized: Only Super Admins can delete assets.' }
+  if (session?.role !== 'admin') {
+    return { success: false, error: 'Unauthorized: Only Admins can delete assets.' }
   }
 
   const { data: asset } = await supabase.from('assets').select('serial_number').eq('id', id).single();

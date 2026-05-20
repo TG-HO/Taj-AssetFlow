@@ -6,7 +6,7 @@ export async function getSession() {
   if (!token) return null;
   try {
     const decoded = Buffer.from(token, 'base64').toString('utf-8');
-    return JSON.parse(decoded) as { id: string; username: string; role: string };
+    return JSON.parse(decoded) as { id: string; username: string; role: string; company_id: string };
   } catch(e) {
     return null;
   }

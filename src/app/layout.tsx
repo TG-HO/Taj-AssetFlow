@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/Sidebar";
 import { getSession } from "@/lib/auth";
+import { TenantSessionProvider } from "@/lib/TenantSessionContext";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -22,12 +23,14 @@ export default async function RootLayout({
   return (
     <html lang="en">
       <body className={`${inter.className} antialiased bg-background text-foreground flex`}>
-        {!isLoginPage && <Sidebar userRole={session?.role} />}
-        <main className={`flex-1 min-h-screen bg-muted/20 ${!isLoginPage ? 'ml-64 max-w-[calc(100vw-16rem)]' : 'w-full max-w-[100vw]'} overflow-x-hidden`}>
-          <div className="p-4 sm:p-8 w-full max-w-7xl mx-auto">
-            {children}
-          </div>
-        </main>
+        <TenantSessionProvider>
+          {!isLoginPage && <Sidebar userRole={session?.role} />}
+          <main className={`flex-1 min-h-screen bg-muted/20 ${!isLoginPage ? 'ml-64 max-w-[calc(100vw-16rem)]' : 'w-full max-w-[100vw]'} overflow-x-hidden`}>
+            <div className="p-4 sm:p-8 w-full max-w-7xl mx-auto">
+              {children}
+            </div>
+          </main>
+        </TenantSessionProvider>
       </body>
     </html>
   );
