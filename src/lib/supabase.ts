@@ -5,7 +5,7 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env
 
 export const rawSupabase = createClient(supabaseUrl, supabaseAnonKey);
 
-const TABLES_TO_SCOPE = ['assets', 'admin_logs'];
+const TABLES_TO_SCOPE = ['assets', 'admin_logs', 'locations'];
 
 function getClientCompanyId(): string | null {
   if (typeof window !== 'undefined') {

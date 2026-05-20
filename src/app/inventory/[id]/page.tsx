@@ -168,11 +168,21 @@ export default function AssetPassportPage({ params }: { params: Promise<{ id: st
                   <dt className="text-sm font-medium text-muted-foreground">Currently Assigned To</dt>
                   <dd className="mt-1 text-lg font-semibold">{asset.assignedTo || 'Unassigned'}</dd>
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="bg-primary/10 p-2 rounded-md"><MapPin className="h-5 w-5 text-primary" /></div>
-                  <div>
-                    <dt className="text-sm font-medium text-muted-foreground">Location</dt>
-                    <dd className="mt-1 font-semibold">{asset.location}</dd>
+                <div className="flex items-start gap-3">
+                  <div className="bg-primary/10 p-2 rounded-md mt-1"><MapPin className="h-5 w-5 text-primary" /></div>
+                  <div className="space-y-1">
+                    <dt className="text-sm font-medium text-muted-foreground">Location Hierarchy</dt>
+                    <dd className="font-semibold text-foreground">{asset.location}</dd>
+                    {asset.subLocationName && (
+                      <dd className="text-xs text-muted-foreground">
+                        <span className="font-medium text-primary">Department:</span> {asset.subLocationName}
+                      </dd>
+                    )}
+                    {asset.warehouseName && (
+                      <dd className="text-xs text-muted-foreground">
+                        <span className="font-medium text-primary">Warehouse:</span> {asset.warehouseName}
+                      </dd>
+                    )}
                   </div>
                 </div>
                 {asset.oldUsername && (

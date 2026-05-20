@@ -46,14 +46,27 @@ export default function InventoryPage() {
 
   const fetchInventory = async () => {
     setIsLoading(true);
-    const { data, error } = await supabase.from('assets').select('*').order('created_at', { ascending: false });
+    const { data, error } = await supabase
+      .from('assets')
+      .select(`
+        *,
+        sub_locations ( name ),
+        warehouses ( name )
+      `)
+      .order('created_at', { ascending: false });
+      
     if (!error && data) {
-      setInventory(data.map(item => ({
+      setInventory(data.map((item: any) => ({
         id: item.id,
         laptopName: item.laptop_name,
         serialNumber: item.serial_number,
         assignedTo: item.assigned_to || 'Unassigned',
         location: item.location,
+        locationId: item.location_id,
+        subLocationId: item.sub_location_id,
+        subLocationName: item.sub_locations?.name || null,
+        warehouseId: item.warehouse_id,
+        warehouseName: item.warehouses?.name || null,
         status: item.status,
         issueDate: item.issue_date,
         updatedAt: item.updated_at
@@ -497,7 +510,18 @@ export default function InventoryPage() {
                   <TableCell className="font-medium truncate" title={item.serialNumber}>{item.serialNumber}</TableCell>
                   <TableCell className="truncate" title={item.laptopName}>{item.laptopName}</TableCell>
                   <TableCell className="truncate" title={item.assignedTo}>{item.assignedTo}</TableCell>
-                  <TableCell className="truncate" title={item.location}>{item.location}</TableCell>
+                  <TableCell className="truncate">
+                    <div className="flex flex-col">
+                      <span className="font-semibold text-foreground truncate" title={item.location}>{item.location}</span>
+                      {(item.subLocationName || item.warehouseName) && (
+                        <span className="text-[10px] text-muted-foreground truncate max-w-full">
+                          {item.subLocationName || ''}
+                          {item.subLocationName && item.warehouseName ? ' / ' : ''}
+                          {item.warehouseName || ''}
+                        </span>
+                      )}
+                    </div>
+                  </TableCell>
                   <TableCell>
                     <Badge variant={
                       item.status === 'Faulty' ? 'destructive' : 

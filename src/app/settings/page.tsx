@@ -1,167 +1,1047 @@
 'use client';
 
-import { useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Bell, Database, Download, Monitor, Shield, User } from "lucide-react";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { 
+  MapPin, 
+  Plus, 
+  Trash2, 
+  ChevronDown, 
+  Loader2, 
+  AlertTriangle, 
+  AlertCircle,
+  Building,
+  Edit,
+  ArrowLeft,
+  Info,
+  MoreVertical,
+  UserPlus,
+  Users,
+  Shield,
+  User,
+  Eye,
+  EyeOff,
+  Palette,
+  Bell,
+  Check
+} from "lucide-react";
 import { supabase } from '@/lib/supabase';
 import { useTenantSession } from '@/lib/TenantSessionContext';
+import { 
+  addLocation, 
+  addSubLocation, 
+  addWarehouse, 
+  deleteLocation, 
+  deleteSubLocation, 
+  deleteWarehouse,
+  updateLocation,
+  updateSubLocation,
+  updateWarehouse
+} from '../inventory/actions';
+import { getUsers, createUser, deleteUser } from '../users/actions';
+
+// ─── Color Themes ───────────────────────────────────────────────────
+const COLOR_THEMES = [
+  {
+    id: 'blue',
+    name: 'Ocean Blue',
+    primary: 'oklch(0.45 0.18 250)',
+    primaryFg: 'oklch(0.985 0 0)',
+    swatch: '#3b82f6',
+  },
+  {
+    id: 'default',
+    name: 'Crimson Red',
+    primary: 'oklch(0.35 0.12 340)',
+    primaryFg: 'oklch(0.985 0 0)',
+    swatch: '#be123c',
+  },
+  {
+    id: 'emerald',
+    name: 'Emerald Green',
+    primary: 'oklch(0.50 0.16 162)',
+    primaryFg: 'oklch(0.985 0 0)',
+    swatch: '#10b981',
+  },
+  {
+    id: 'violet',
+    name: 'Violet Purple',
+    primary: 'oklch(0.48 0.22 292)',
+    primaryFg: 'oklch(0.985 0 0)',
+    swatch: '#7c3aed',
+  },
+  {
+    id: 'amber',
+    name: 'Amber Orange',
+    primary: 'oklch(0.65 0.18 70)',
+    primaryFg: 'oklch(0.145 0 0)',
+    swatch: '#f59e0b',
+  },
+];
+
+function applyTheme(themeId: string) {
+  const theme = COLOR_THEMES.find(t => t.id === themeId);
+  if (!theme) return;
+  const root = document.documentElement;
+  // Set directly as full oklch() values on :root
+  root.style.setProperty('--primary', theme.primary);
+  root.style.setProperty('--primary-foreground', theme.primaryFg);
+  // Also update the ring to match
+  root.style.setProperty('--ring', theme.primary);
+  localStorage.setItem('color_theme', themeId);
+}
+
+// ─── Viewport-aware dropdown hook ───────────────────────────────────
+interface DropdownPos { top: number; left: number; openUp: boolean }
 
 export default function SettingsPage() {
   const { company, profile, isLoading } = useTenantSession();
-  const [isExporting, setIsExporting] = useState(false);
+  const userRole = profile?.role || 'moderator';
 
-  const handleExportCSV = async () => {
-    setIsExporting(true);
-    try {
-      const { data, error } = await supabase.from('assets').select('*').order('created_at', { ascending: false });
-      if (error) throw error;
-      
-      if (!data || data.length === 0) {
-        alert("No assets found to export.");
-        setIsExporting(false);
-        return;
-      }
+  // Tabs
+  const [activeTab, setActiveTab] = useState('locations');
+  const [isHeaderHovered, setIsHeaderHovered] = useState(false);
 
-      const headers = ['Laptop Name', 'Serial Number', 'RAM', 'Storage Type', 'Storage Capacity', 'Assigned To', 'Location', 'Status', 'Old Username', 'Purchase Date', 'Issue Date', 'Details'];
-      
-      const csvContent = [
-        headers.join(','),
-        ...data.map(item => [
-          `"${item.laptop_name || ''}"`,
-          `"${item.serial_number || ''}"`,
-          `"${item.ram || ''}"`,
-          `"${item.storage_type || ''}"`,
-          `"${item.storage_capacity || ''}"`,
-          `"${item.assigned_to || ''}"`,
-          `"${item.location || ''}"`,
-          `"${item.status || ''}"`,
-          `"${item.old_username || ''}"`,
-          `"${item.purchase_date || ''}"`,
-          `"${item.issue_date || ''}"`,
-          `"${(item.details || '').replace(/"/g, '""')}"`
-        ].join(','))
-      ].join('\n');
+  // Locations state
+  const [locations, setLocations] = useState<any[]>([]);
+  const [isLocLoading, setIsLocLoading] = useState(false);
 
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.setAttribute("href", url);
-      link.setAttribute("download", `taj_inventory_export_${new Date().toISOString().split('T')[0]}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } catch (err: any) {
-      alert("Error exporting data: " + err.message);
+  // Viewport-aware dropdown state
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [menuPos, setMenuPos] = useState<DropdownPos>({ top: 0, left: 0, openUp: false });
+  const floatingMenuRef = useRef<HTMLDivElement>(null);
+  // Header hover delay timer
+  const headerHoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Sub-view Level
+  const [locView, setLocView] = useState<'list' | 'sub-locations' | 'warehouses'>('list');
+  const [selectedLoc, setSelectedLoc] = useState<any | null>(null);
+
+  // Modal visibility
+  const [isAddLocOpen, setIsAddLocOpen] = useState(false);
+  const [isEditLocOpen, setIsEditLocOpen] = useState(false);
+  const [isAddSubOpen, setIsAddSubOpen] = useState(false);
+  const [isEditSubOpen, setIsEditSubOpen] = useState(false);
+  const [isAddWhOpen, setIsAddWhOpen] = useState(false);
+  const [isEditWhOpen, setIsEditWhOpen] = useState(false);
+
+  // Loc form
+  const [newLocName, setNewLocName] = useState('');
+  const [newLocAddress, setNewLocAddress] = useState('');
+  const [isAddingLoc, setIsAddingLoc] = useState(false);
+  const [editLocId, setEditLocId] = useState('');
+  const [editLocName, setEditLocName] = useState('');
+  const [editLocAddress, setEditLocAddress] = useState('');
+  const [isEditingLoc, setIsEditingLoc] = useState(false);
+
+  // Sub form
+  const [newSubName, setNewSubName] = useState('');
+  const [newSubCost, setNewSubCost] = useState('');
+  const [isAddingSub, setIsAddingSub] = useState(false);
+  const [editSubId, setEditSubId] = useState('');
+  const [editSubName, setEditSubName] = useState('');
+  const [editSubCost, setEditSubCost] = useState('');
+  const [isEditingSub, setIsEditingSub] = useState(false);
+
+  // Wh form
+  const [newWhName, setNewWhName] = useState('');
+  const [newWhRack, setNewWhRack] = useState('');
+  const [isAddingWh, setIsAddingWh] = useState(false);
+  const [editWhId, setEditWhId] = useState('');
+  const [editWhName, setEditWhName] = useState('');
+  const [editWhRack, setEditWhRack] = useState('');
+  const [isEditingWh, setIsEditingWh] = useState(false);
+
+  // Error / confirm dialogs
+  const [isErrorOpen, setIsErrorOpen] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [deleteConfirmLoc, setDeleteConfirmLoc] = useState<any | null>(null);
+  const [isDeletingLoc, setIsDeletingLoc] = useState(false);
+  const [deleteConfirmSub, setDeleteConfirmSub] = useState<any | null>(null);
+  const [deleteConfirmWh, setDeleteConfirmWh] = useState<any | null>(null);
+
+  // Users
+  const [users, setUsers] = useState<any[]>([]);
+  const [isUsersLoading, setIsUsersLoading] = useState(false);
+  const [newUsername, setNewUsername] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [newUserRole, setNewUserRole] = useState('moderator');
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
+
+  // Appearance
+  const [activeTheme, setActiveTheme] = useState('blue');
+
+  // Read URL tab on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const tab = params.get('tab');
+      if (tab) setActiveTab(tab);
+
+      // Restore saved theme
+      const saved = localStorage.getItem('color_theme') || 'blue';
+      setActiveTheme(saved);
+      applyTheme(saved);
     }
-    setIsExporting(false);
+  }, []);
+
+  // Close dropdown on outside click — check ref so menu clicks don't self-close
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (floatingMenuRef.current && floatingMenuRef.current.contains(e.target as Node)) return;
+      setOpenMenuId(null);
+    }
+    if (openMenuId) {
+      document.addEventListener('mousedown', handleClick);
+      return () => document.removeEventListener('mousedown', handleClick);
+    }
+  }, [openMenuId]);
+
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+    setIsHeaderHovered(false);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', tab);
+      window.history.pushState(null, '', url.pathname + url.search);
+    }
   };
 
+  // ── Locations fetch ──────────────────────────────────────────────
+  const fetchLocationsData = useCallback(async () => {
+    setIsLocLoading(true);
+    try {
+      const [{ data: locs }, { data: subs }, { data: whs }] = await Promise.all([
+        supabase.from('locations').select('*').order('name'),
+        supabase.from('sub_locations').select('*').order('name'),
+        supabase.from('warehouses').select('*').order('name'),
+      ]);
+      const mapped = (locs || []).map((loc: any) => ({
+        ...loc,
+        subLocations: subs?.filter((s: any) => s.location_id === loc.id) || [],
+        warehouses: whs?.filter((w: any) => w.location_id === loc.id) || [],
+      }));
+      setLocations(mapped);
+      if (selectedLoc) {
+        const updated = mapped.find(l => l.id === selectedLoc.id);
+        if (updated) setSelectedLoc(updated);
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message);
+      setIsErrorOpen(true);
+    } finally {
+      setIsLocLoading(false);
+    }
+  }, [selectedLoc]);
+
+  const fetchUsersData = useCallback(async () => {
+    setIsUsersLoading(true);
+    try {
+      const data = await getUsers();
+      setUsers(data);
+    } catch (err: any) {
+      setErrorMsg(err.message);
+      setIsErrorOpen(true);
+    } finally {
+      setIsUsersLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'locations') fetchLocationsData();
+    else if (activeTab === 'users' && userRole === 'admin') fetchUsersData();
+  }, [activeTab]);
+
+  // ── Viewport-aware menu trigger ──────────────────────────────────
+  const handleMenuOpen = (e: React.MouseEvent<HTMLButtonElement>, locId: string) => {
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const menuHeight = 200; // approximate
+    const openUp = spaceBelow < menuHeight;
+    setMenuPos({
+      top: openUp ? rect.top - menuHeight + window.scrollY : rect.bottom + window.scrollY + 4,
+      left: rect.right - 192, // 192 = w-48
+      openUp,
+    });
+    setOpenMenuId(prev => prev === locId ? null : locId);
+  };
+
+  // ── Location CRUD ────────────────────────────────────────────────
+  const handleAddLocation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newLocName.trim()) return;
+    setIsAddingLoc(true);
+    const result = await addLocation(newLocName, newLocAddress);
+    setIsAddingLoc(false);
+    if (result.success) { setNewLocName(''); setNewLocAddress(''); setIsAddLocOpen(false); fetchLocationsData(); }
+    else { setErrorMsg(result.error || 'Failed to add location'); setIsErrorOpen(true); }
+  };
+
+  const handleEditLocation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editLocName.trim()) return;
+    setIsEditingLoc(true);
+    const result = await updateLocation(editLocId, editLocName, editLocAddress);
+    setIsEditingLoc(false);
+    if (result.success) { setIsEditLocOpen(false); fetchLocationsData(); }
+    else { setErrorMsg(result.error || 'Failed to update location'); setIsErrorOpen(true); }
+  };
+
+  const handleConfirmDeleteLocation = async () => {
+    if (!deleteConfirmLoc) return;
+    setIsDeletingLoc(true);
+    const result = await deleteLocation(deleteConfirmLoc.id);
+    setIsDeletingLoc(false);
+    setDeleteConfirmLoc(null);
+    if (result.success) fetchLocationsData();
+    else { setErrorMsg(result.error || 'Failed to delete location'); setIsErrorOpen(true); }
+  };
+
+  // ── Sub-location CRUD ────────────────────────────────────────────
+  const handleAddSub = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedLoc || !newSubName.trim()) return;
+    setIsAddingSub(true);
+    const result = await addSubLocation(selectedLoc.id, newSubName, newSubCost);
+    setIsAddingSub(false);
+    if (result.success) { setNewSubName(''); setNewSubCost(''); setIsAddSubOpen(false); fetchLocationsData(); }
+    else { setErrorMsg(result.error || 'Failed to add department'); setIsErrorOpen(true); }
+  };
+
+  const handleEditSub = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editSubName.trim()) return;
+    setIsEditingSub(true);
+    const result = await updateSubLocation(editSubId, editSubName, editSubCost);
+    setIsEditingSub(false);
+    if (result.success) { setIsEditSubOpen(false); fetchLocationsData(); }
+    else { setErrorMsg(result.error || 'Failed to update department'); setIsErrorOpen(true); }
+  };
+
+  const handleDeleteSub = async (sub: any) => {
+    const result = await deleteSubLocation(sub.id);
+    setDeleteConfirmSub(null);
+    if (result.success) fetchLocationsData();
+    else { setErrorMsg(result.error || 'Failed to delete department'); setIsErrorOpen(true); }
+  };
+
+  // ── Warehouse CRUD ───────────────────────────────────────────────
+  const handleAddWh = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedLoc || !newWhName.trim()) return;
+    setIsAddingWh(true);
+    const result = await addWarehouse(selectedLoc.id, newWhName, newWhRack);
+    setIsAddingWh(false);
+    if (result.success) { setNewWhName(''); setNewWhRack(''); setIsAddWhOpen(false); fetchLocationsData(); }
+    else { setErrorMsg(result.error || 'Failed to add warehouse'); setIsErrorOpen(true); }
+  };
+
+  const handleEditWh = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editWhName.trim()) return;
+    setIsEditingWh(true);
+    const result = await updateWarehouse(editWhId, editWhName, editWhRack);
+    setIsEditingWh(false);
+    if (result.success) { setIsEditWhOpen(false); fetchLocationsData(); }
+    else { setErrorMsg(result.error || 'Failed to update warehouse'); setIsErrorOpen(true); }
+  };
+
+  const handleDeleteWh = async (wh: any) => {
+    const result = await deleteWarehouse(wh.id);
+    setDeleteConfirmWh(null);
+    if (result.success) fetchLocationsData();
+    else { setErrorMsg(result.error || 'Failed to delete warehouse'); setIsErrorOpen(true); }
+  };
+
+  // ── User CRUD ────────────────────────────────────────────────────
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsCreatingUser(true);
+    const result = await createUser(newUsername, newPassword, newUserRole);
+    setIsCreatingUser(false);
+    if (result.success) { setNewUsername(''); setNewPassword(''); setNewUserRole('moderator'); fetchUsersData(); }
+    else { setErrorMsg(result.error || 'Failed to create user'); setIsErrorOpen(true); }
+  };
+
+  const handleDeleteUser = async (id: string) => {
+    const result = await deleteUser(id);
+    if (result.success) fetchUsersData();
+    else { setErrorMsg(result.error || 'Failed to delete user'); setIsErrorOpen(true); }
+  };
+
+  // ── Header labels ────────────────────────────────────────────────
+  const TAB_LABELS: Record<string, string> = {
+    locations: 'Location Settings',
+    users: 'User Management',
+    appearance: 'Appearance',
+    notifications: 'Notifications',
+    security: 'Security',
+  };
+  const TAB_DESCS: Record<string, string> = {
+    locations: 'Configure organization branches, departments, and inventory warehouses.',
+    users: 'Manage administrative roles and access keys for staff members.',
+    appearance: 'Customize the interface color palette and visual preferences.',
+    notifications: 'Manage alerts, reports, and critical warning preferences.',
+    security: 'Review security audits and authentication policies.',
+  };
+  const ALL_TABS = [
+    { id: 'locations', label: 'Location Settings', icon: MapPin },
+    { id: 'appearance', label: 'Appearance', icon: Palette },
+    { id: 'notifications', label: 'Notifications', icon: Bell },
+    { id: 'security', label: 'Security', icon: Shield },
+    ...(userRole === 'admin' ? [{ id: 'users', label: 'User Management', icon: Users }] : []),
+  ];
+
   return (
-    <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div>
-        <h2 className="text-3xl font-bold tracking-tight text-primary">Settings</h2>
-        <p className="text-muted-foreground mt-1">Manage application preferences and system administration.</p>
+    <div className="max-w-6xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-16">
+
+      {/* Header with hover-dropdown tab switcher */}
+      <div
+        className="relative inline-block"
+        onMouseEnter={() => {
+          if (headerHoverTimer.current) clearTimeout(headerHoverTimer.current);
+          setIsHeaderHovered(true);
+        }}
+        onMouseLeave={() => {
+          headerHoverTimer.current = setTimeout(() => setIsHeaderHovered(false), 400);
+        }}
+      >
+        <h2 className="text-3xl font-bold tracking-tight text-primary flex items-center gap-1.5 cursor-pointer hover:opacity-85 select-none py-1">
+          {TAB_LABELS[activeTab] || 'Settings'}
+          <ChevronDown className="h-6 w-6 text-primary mt-1 transition-transform duration-200" />
+        </h2>
+        {isHeaderHovered && (
+          <div className="absolute left-0 mt-1 w-60 bg-white border border-border rounded-xl shadow-xl py-2 z-40 animate-in fade-in slide-in-from-top-1 duration-150">
+            {ALL_TABS.map((tab, idx) => {
+              const Icon = tab.icon;
+              const isFirst = idx === 0;
+              const needsDivider = tab.id === 'users';
+              return (
+                <div key={tab.id}>
+                  {needsDivider && <div className="my-1.5 mx-3 border-t border-border/50" />}
+                  <button
+                    onClick={() => handleTabChange(tab.id)}
+                    className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-left font-medium transition-colors ${
+                      activeTab === tab.id
+                        ? 'bg-primary/10 text-primary font-semibold'
+                        : 'text-muted-foreground hover:bg-muted'
+                    }`}
+                  >
+                    <Icon size={15} />
+                    {tab.label}
+                    {activeTab === tab.id && <Check size={13} className="ml-auto" />}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <p className="text-muted-foreground text-sm mt-0.5">{TAB_DESCS[activeTab]}</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="md:col-span-1 space-y-1">
-          <nav className="flex flex-col gap-1">
-            <Button variant="secondary" className="justify-start shadow-none bg-primary/10 text-primary font-semibold">
-              <User className="mr-2 h-4 w-4" />
-              Profile & Account
-            </Button>
-            <Button variant="ghost" className="justify-start hover:bg-muted text-muted-foreground">
-              <Monitor className="mr-2 h-4 w-4" />
-              Appearance
-            </Button>
-            <Button variant="ghost" className="justify-start hover:bg-muted text-muted-foreground">
-              <Bell className="mr-2 h-4 w-4" />
-              Notifications
-            </Button>
-            <Button variant="ghost" className="justify-start hover:bg-muted text-muted-foreground">
-              <Database className="mr-2 h-4 w-4" />
-              Data & Export
-            </Button>
-            <Button variant="ghost" className="justify-start hover:bg-muted text-muted-foreground">
-              <Shield className="mr-2 h-4 w-4" />
-              Security
-            </Button>
-          </nav>
-        </div>
+      <div className="mt-6">
 
-        <div className="md:col-span-2 space-y-6">
-          <Card className="shadow-sm">
-            <CardHeader>
-              <CardTitle>Organization Profile</CardTitle>
-              <CardDescription>Update your company details and administrative contacts.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="org-name">Organization Name</Label>
-                <Input id="org-name" value={isLoading ? 'Loading...' : (company?.name || 'Unknown Company')} disabled />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="admin-email">User Email</Label>
-                <Input id="admin-email" value={isLoading ? 'Loading...' : (profile?.email || 'Unknown Email')} disabled type="email" />
-              </div>
-            </CardContent>
-            <CardFooter className="border-t px-6 py-4 bg-muted/20">
-              <Button>Save Changes</Button>
-            </CardFooter>
-          </Card>
+        {/* ──────────────────────────────────────────────────────── */}
+        {/* TAB: LOCATIONS                                          */}
+        {/* ──────────────────────────────────────────────────────── */}
+        {activeTab === 'locations' && (
+          <div className="space-y-6">
 
-          <Card className="shadow-sm">
-            <CardHeader>
-              <CardTitle>System Preferences</CardTitle>
-              <CardDescription>Customize how Taj AssetFlow behaves.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex items-center justify-between space-x-2 p-4 border rounded-md bg-card">
-                <div className="flex flex-col space-y-1">
-                  <Label>Email Alerts</Label>
-                  <span className="text-sm text-muted-foreground">Receive weekly inventory summary reports.</span>
-                </div>
-                <Checkbox defaultChecked className="h-5 w-5" />
-              </div>
-              <div className="flex items-center justify-between space-x-2 p-4 border rounded-md bg-card">
-                <div className="flex flex-col space-y-1">
-                  <Label>Auto-generate Passports</Label>
-                  <span className="text-sm text-muted-foreground">Automatically format passport views for printing.</span>
-                </div>
-                <Checkbox defaultChecked className="h-5 w-5" />
-              </div>
-            </CardContent>
-          </Card>
+            {/* TIER 1 */}
+            {locView === 'list' && (
+              <Card className="shadow-sm border border-muted/50 overflow-visible">
+                <CardHeader className="flex flex-row justify-between items-center space-y-0 border-b pb-4 bg-muted/5">
+                  <div>
+                    <CardTitle className="text-lg font-bold flex items-center gap-2">
+                      <Building className="h-5 w-5 text-primary" /> Corporate Locations
+                    </CardTitle>
+                    <CardDescription>Primary business branches and offices.</CardDescription>
+                  </div>
+                  <Button onClick={() => setIsAddLocOpen(true)} className="gap-2 shrink-0">
+                    <Plus className="h-4 w-4" /> Add Location
+                  </Button>
+                </CardHeader>
+                <CardContent className="p-0 overflow-visible">
+                  {isLocLoading ? (
+                    <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                      <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
+                      <span className="text-sm">Loading locations...</span>
+                    </div>
+                  ) : locations.length === 0 ? (
+                    <div className="p-8 text-center text-muted-foreground">
+                      <Building className="h-12 w-12 mx-auto text-muted/50 mb-3" />
+                      <p className="font-semibold text-lg text-primary">No Locations Configured</p>
+                      <p className="text-sm mb-4">Set up primary offices to get started.</p>
+                      <Button onClick={() => setIsAddLocOpen(true)} variant="outline">Create First Location</Button>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto overflow-y-visible">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="hover:bg-transparent bg-muted/10">
+                            <TableHead className="font-semibold text-foreground py-3">Location Name</TableHead>
+                            <TableHead className="font-semibold text-foreground py-3">Address</TableHead>
+                            <TableHead className="font-semibold text-foreground py-3">Departments</TableHead>
+                            <TableHead className="font-semibold text-foreground py-3">Warehouses</TableHead>
+                            <TableHead className="font-semibold text-foreground py-3 text-right">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {locations.map((loc) => (
+                            <TableRow key={loc.id} className="hover:bg-muted/10">
+                              <TableCell className="font-bold text-foreground py-3.5">{loc.name}</TableCell>
+                              <TableCell className="text-muted-foreground text-sm py-3.5">{loc.address || '—'}</TableCell>
+                              <TableCell className="py-3.5">
+                                <Badge variant="secondary" className="bg-primary/5 text-primary border-none font-semibold">
+                                  {loc.subLocations.length} Departments
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="py-3.5">
+                                <Badge variant="secondary" className="bg-secondary/10 text-secondary-foreground border-none font-semibold">
+                                  {loc.warehouses.length} Warehouses
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="py-3.5 text-right">
+                                <div className="inline-block">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={(e) => handleMenuOpen(e, loc.id)}
+                                    className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                                  >
+                                    <MoreVertical className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
-          <Card className="border-primary/20 bg-primary/5 shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-primary flex items-center gap-2">
-                <Database className="h-5 w-5" />
-                Data Management
+            {/* TIER 2: DEPARTMENTS */}
+            {locView === 'sub-locations' && selectedLoc && (
+              <div className="space-y-4">
+                <Button variant="ghost" onClick={() => setLocView('list')} className="gap-2 hover:bg-muted text-muted-foreground hover:text-foreground">
+                  <ArrowLeft className="h-4 w-4" /> Back to Locations
+                </Button>
+                <Card className="shadow-sm border border-muted/50">
+                  <CardHeader className="flex flex-row justify-between items-center space-y-0 border-b pb-4 bg-muted/5">
+                    <div>
+                      <CardTitle className="text-lg font-bold flex items-center gap-2">
+                        <Building className="h-5 w-5 text-primary" /> Departments — {selectedLoc.name}
+                      </CardTitle>
+                      <CardDescription>Sub-locations and cost-center groups.</CardDescription>
+                    </div>
+                    <Button onClick={() => setIsAddSubOpen(true)} className="gap-2 shrink-0">
+                      <Plus className="h-4 w-4" /> Add Department
+                    </Button>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    {selectedLoc.subLocations.length === 0 ? (
+                      <div className="p-8 text-center text-muted-foreground">
+                        <p className="font-semibold text-base mb-2">No Departments Added</p>
+                        <Button onClick={() => setIsAddSubOpen(true)} variant="outline">Add First Department</Button>
+                      </div>
+                    ) : (
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="hover:bg-transparent bg-muted/10">
+                            <TableHead className="font-semibold text-foreground py-3">Department Name</TableHead>
+                            <TableHead className="font-semibold text-foreground py-3">Cost Center Code</TableHead>
+                            <TableHead className="font-semibold text-foreground py-3 text-right">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {selectedLoc.subLocations.map((sub: any) => (
+                            <TableRow key={sub.id} className="hover:bg-muted/10">
+                              <TableCell className="font-semibold text-foreground py-3">{sub.name}</TableCell>
+                              <TableCell className="py-3">
+                                {sub.cost_center_code
+                                  ? <Badge className="bg-primary/10 text-primary border-none font-mono text-[11px]">{sub.cost_center_code}</Badge>
+                                  : <span className="text-muted-foreground text-sm">None</span>}
+                              </TableCell>
+                              <TableCell className="py-3 text-right space-x-1">
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10"
+                                  onClick={() => { setEditSubId(sub.id); setEditSubName(sub.name); setEditSubCost(sub.cost_center_code || ''); setIsEditSubOpen(true); }}>
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                  onClick={() => setDeleteConfirmSub(sub)}>
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            {/* TIER 3: WAREHOUSES */}
+            {locView === 'warehouses' && selectedLoc && (
+              <div className="space-y-4">
+                <Button variant="ghost" onClick={() => setLocView('list')} className="gap-2 hover:bg-muted text-muted-foreground hover:text-foreground">
+                  <ArrowLeft className="h-4 w-4" /> Back to Locations
+                </Button>
+                <Card className="shadow-sm border border-muted/50">
+                  <CardHeader className="flex flex-row justify-between items-center space-y-0 border-b pb-4 bg-muted/5">
+                    <div>
+                      <CardTitle className="text-lg font-bold flex items-center gap-2">
+                        <Building className="h-5 w-5 text-primary" /> Warehouses — {selectedLoc.name}
+                      </CardTitle>
+                      <CardDescription>Physical storage zones and rack layouts.</CardDescription>
+                    </div>
+                    <Button onClick={() => setIsAddWhOpen(true)} className="gap-2 shrink-0">
+                      <Plus className="h-4 w-4" /> Add Warehouse
+                    </Button>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    {selectedLoc.warehouses.length === 0 ? (
+                      <div className="p-8 text-center text-muted-foreground">
+                        <p className="font-semibold text-base mb-2">No Warehouses Configured</p>
+                        <Button onClick={() => setIsAddWhOpen(true)} variant="outline">Add First Warehouse</Button>
+                      </div>
+                    ) : (
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="hover:bg-transparent bg-muted/10">
+                            <TableHead className="font-semibold text-foreground py-3">Warehouse / Zone Name</TableHead>
+                            <TableHead className="font-semibold text-foreground py-3">Rack Number</TableHead>
+                            <TableHead className="font-semibold text-foreground py-3 text-right">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {selectedLoc.warehouses.map((wh: any) => (
+                            <TableRow key={wh.id} className="hover:bg-muted/10">
+                              <TableCell className="font-semibold text-foreground py-3">{wh.name}</TableCell>
+                              <TableCell className="py-3">
+                                {wh.rack_number
+                                  ? <Badge className="bg-secondary/15 text-secondary-foreground border-none font-mono text-[11px]">Rack: {wh.rack_number}</Badge>
+                                  : <span className="text-muted-foreground text-sm">None</span>}
+                              </TableCell>
+                              <TableCell className="py-3 text-right space-x-1">
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10"
+                                  onClick={() => { setEditWhId(wh.id); setEditWhName(wh.name); setEditWhRack(wh.rack_number || ''); setIsEditWhOpen(true); }}>
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                  onClick={() => setDeleteConfirmWh(wh)}>
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ──────────────────────────────────────────────────────── */}
+        {/* TAB: APPEARANCE                                         */}
+        {/* ──────────────────────────────────────────────────────── */}
+        {activeTab === 'appearance' && (
+          <Card className="shadow-sm border border-muted/50">
+            <CardHeader className="border-b pb-4 bg-muted/5">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Palette className="h-5 w-5 text-primary" /> Color Theme
               </CardTitle>
-              <CardDescription>Export your entire database records to a local file.</CardDescription>
+              <CardDescription>
+                Choose a color palette for the interface. Changes apply immediately and are saved to this browser.
+              </CardDescription>
             </CardHeader>
-            <CardContent>
-              <p className="text-sm mb-4 text-muted-foreground">
-                Downloading your data will generate a CSV file containing all hardware specs, assignment histories, and status logs.
-              </p>
-              <Button 
-                variant="outline" 
-                className="w-full sm:w-auto gap-2 bg-background border-primary/20 hover:bg-primary/10 hover:text-primary transition-colors"
-                onClick={handleExportCSV}
-                disabled={isExporting}
-              >
-                <Download className="h-4 w-4" />
-                {isExporting ? 'Generating CSV...' : 'Export Inventory as CSV'}
-              </Button>
+            <CardContent className="py-8">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+                {COLOR_THEMES.map(theme => (
+                  <button
+                    key={theme.id}
+                    onClick={() => { setActiveTheme(theme.id); applyTheme(theme.id); }}
+                    className={`group relative flex flex-col items-center gap-3 p-4 rounded-xl border-2 transition-all duration-200 hover:scale-105 ${
+                      activeTheme === theme.id
+                        ? 'border-primary shadow-md shadow-primary/20 bg-primary/5'
+                        : 'border-border hover:border-muted-foreground/30 bg-background'
+                    }`}
+                  >
+                    {/* Swatch */}
+                    <div
+                      className="w-14 h-14 rounded-full shadow-inner flex items-center justify-center transition-transform duration-200 group-hover:scale-105"
+                      style={{ backgroundColor: theme.swatch }}
+                    >
+                      {activeTheme === theme.id && (
+                        <Check className="h-6 w-6 text-white drop-shadow" />
+                      )}
+                    </div>
+                    {/* UI preview strips */}
+                    <div className="w-full flex flex-col gap-1">
+                      <div className="h-2 rounded-full w-full" style={{ backgroundColor: theme.swatch, opacity: 0.9 }} />
+                      <div className="h-1.5 rounded-full w-3/4" style={{ backgroundColor: theme.swatch, opacity: 0.4 }} />
+                      <div className="h-1.5 rounded-full w-1/2" style={{ backgroundColor: theme.swatch, opacity: 0.25 }} />
+                    </div>
+                    <span className="text-xs font-semibold text-foreground text-center leading-tight">{theme.name}</span>
+                    {activeTheme === theme.id && (
+                      <span className="text-[10px] text-primary font-bold uppercase tracking-wider">Active</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-8 p-4 rounded-xl border border-muted bg-muted/30">
+                <p className="text-xs text-muted-foreground">
+                  <span className="font-semibold text-foreground">Preview:</span> The selected color is applied to buttons, active sidebar items, badges, and interactive elements across the entire application.
+                </p>
+              </div>
             </CardContent>
           </Card>
-        </div>
+        )}
+
+        {/* ──────────────────────────────────────────────────────── */}
+        {/* TAB: NOTIFICATIONS                                      */}
+        {/* ──────────────────────────────────────────────────────── */}
+        {activeTab === 'notifications' && (
+          <Card className="shadow-sm">
+            <CardHeader>
+              <CardTitle>Notification Settings</CardTitle>
+              <CardDescription>Manage your alerts, reports and critical warnings.</CardDescription>
+            </CardHeader>
+            <CardContent className="py-8 text-center text-muted-foreground text-sm">
+              Notification preferences are managed by organizational administrative policies.
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ──────────────────────────────────────────────────────── */}
+        {/* TAB: SECURITY                                           */}
+        {/* ──────────────────────────────────────────────────────── */}
+        {activeTab === 'security' && (
+          <Card className="shadow-sm">
+            <CardHeader>
+              <CardTitle>Security &amp; Sessions</CardTitle>
+              <CardDescription>Review security audits and authentication policies.</CardDescription>
+            </CardHeader>
+            <CardContent className="py-8 text-center text-muted-foreground text-sm">
+              Single sign-on sessions are locked. Contact IT administrator to clear active logins.
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ──────────────────────────────────────────────────────── */}
+        {/* TAB: USER MANAGEMENT                                    */}
+        {/* ──────────────────────────────────────────────────────── */}
+        {activeTab === 'users' && userRole === 'admin' && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <Card className="md:col-span-1 shadow-sm h-fit border border-muted/50">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <UserPlus className="h-5 w-5 text-primary" /> Create User
+                </CardTitle>
+                <CardDescription>Assign email access and credentials to staff members.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleCreateUser} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="username">Email Address</Label>
+                    <Input id="username" type="email" placeholder="user@tajgasoline.com" value={newUsername} onChange={e => setNewUsername(e.target.value)} required />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="password">Password</Label>
+                    <div className="relative">
+                      <Input id="password" type={showPassword ? 'text' : 'password'} placeholder="••••••••" value={newPassword} onChange={e => setNewPassword(e.target.value)} required className="pr-10" />
+                      <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="role">Role Permission</Label>
+                    <Select value={newUserRole} onValueChange={val => { if (val) setNewUserRole(val); }}>
+                      <SelectTrigger id="role"><SelectValue placeholder="Select role" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="moderator">Moderator (Read/Write)</SelectItem>
+                        <SelectItem value="admin">Admin (Full Access)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button type="submit" className="w-full" disabled={isCreatingUser}>
+                    {isCreatingUser ? 'Creating...' : 'Create User'}
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+
+            <Card className="md:col-span-2 shadow-sm border border-muted/50 overflow-hidden">
+              <CardHeader className="border-b pb-4 bg-muted/5">
+                <CardTitle className="text-lg">System Users</CardTitle>
+                <CardDescription>Staff accounts with authorization to view and manage assets.</CardDescription>
+              </CardHeader>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent bg-muted/10">
+                      <TableHead className="font-semibold text-foreground py-3">User Email</TableHead>
+                      <TableHead className="font-semibold text-foreground py-3">System Role</TableHead>
+                      <TableHead className="font-semibold text-foreground py-3 text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {isUsersLoading ? (
+                      <TableRow>
+                        <TableCell colSpan={3} className="text-center py-8">
+                          <Loader2 className="h-6 w-6 animate-spin mx-auto text-primary mb-2" />
+                        </TableCell>
+                      </TableRow>
+                    ) : users.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={3} className="text-center py-8 text-muted-foreground">No users found.</TableCell>
+                      </TableRow>
+                    ) : users.map(user => (
+                      <TableRow key={user.id} className="hover:bg-muted/10">
+                        <TableCell className="py-3.5">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-sm">
+                              {user.username.slice(0, 2).toUpperCase()}
+                            </div>
+                            <span className="font-semibold text-foreground">{user.username}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-3.5">
+                          <Badge variant={user.role === 'admin' ? 'default' : 'secondary'} className="gap-1 font-semibold">
+                            {user.role === 'admin' && <Shield className="h-3 w-3" />}
+                            {user.role}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="py-3.5 text-right">
+                          <Button
+                            variant="ghost" size="icon"
+                            className="text-destructive hover:bg-destructive/10"
+                            onClick={() => { if (window.confirm(`Delete user ${user.username}?`)) handleDeleteUser(user.id); }}
+                            disabled={user.id === profile?.id}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
       </div>
+
+      {/* ──────────────────────────────────────────────────────────── */}
+      {/* VIEWPORT-AWARE FLOATING DROPDOWN (portal-style)             */}
+      {/* ──────────────────────────────────────────────────────────── */}
+      {openMenuId && (
+        <div
+          ref={floatingMenuRef}
+          className="fixed z-[9999] w-48 bg-white border border-border rounded-xl shadow-xl py-1.5 animate-in fade-in slide-in-from-top-1 duration-150"
+          style={{ top: menuPos.top, left: menuPos.left }}
+        >
+          {(() => {
+            const loc = locations.find(l => l.id === openMenuId);
+            if (!loc) return null;
+            return (
+              <>
+                <button onClick={() => { setSelectedLoc(loc); setLocView('sub-locations'); setOpenMenuId(null); }}
+                  className="w-full text-left px-4 py-2 text-sm text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors font-medium">
+                  View Departments
+                </button>
+                <button onClick={() => { setSelectedLoc(loc); setLocView('warehouses'); setOpenMenuId(null); }}
+                  className="w-full text-left px-4 py-2 text-sm text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors font-medium">
+                  View Warehouses
+                </button>
+                <div className="my-1 mx-3 border-t border-border/50" />
+                <button onClick={() => { setEditLocId(loc.id); setEditLocName(loc.name); setEditLocAddress(loc.address || ''); setIsEditLocOpen(true); setOpenMenuId(null); }}
+                  className="w-full text-left px-4 py-2 text-sm text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors font-medium">
+                  Edit Location
+                </button>
+                <button onClick={() => { setDeleteConfirmLoc(loc); setOpenMenuId(null); }}
+                  className="w-full text-left px-4 py-2 text-sm text-destructive hover:bg-destructive/10 transition-colors font-medium">
+                  Delete Location
+                </button>
+              </>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────── */}
+      {/* MODALS                                                       */}
+      {/* ──────────────────────────────────────────────────────────── */}
+
+      {/* Add Location */}
+      {isAddLocOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-background border border-primary/20 p-6 rounded-xl shadow-xl w-full max-w-md space-y-4 animate-in zoom-in-95 duration-200">
+            <h3 className="text-lg font-bold text-primary">Add Primary Location</h3>
+            <form onSubmit={handleAddLocation} className="space-y-4">
+              <div className="space-y-2"><Label>Location Name</Label><Input placeholder="e.g. Karachi HQ" value={newLocName} onChange={e => setNewLocName(e.target.value)} required /></div>
+              <div className="space-y-2"><Label>Address (Optional)</Label><Input placeholder="e.g. Main Boulevard, Block C" value={newLocAddress} onChange={e => setNewLocAddress(e.target.value)} /></div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button type="button" variant="outline" onClick={() => setIsAddLocOpen(false)}>Cancel</Button>
+                <Button type="submit" disabled={isAddingLoc}>{isAddingLoc ? 'Adding...' : 'Add Location'}</Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Location */}
+      {isEditLocOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-background border border-primary/20 p-6 rounded-xl shadow-xl w-full max-w-md space-y-4 animate-in zoom-in-95 duration-200">
+            <h3 className="text-lg font-bold text-primary">Edit Location</h3>
+            <form onSubmit={handleEditLocation} className="space-y-4">
+              <div className="space-y-2"><Label>Location Name</Label><Input value={editLocName} onChange={e => setEditLocName(e.target.value)} required /></div>
+              <div className="space-y-2"><Label>Address (Optional)</Label><Input value={editLocAddress} onChange={e => setEditLocAddress(e.target.value)} /></div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button type="button" variant="outline" onClick={() => setIsEditLocOpen(false)}>Cancel</Button>
+                <Button type="submit" disabled={isEditingLoc}>{isEditingLoc ? 'Saving...' : 'Save Changes'}</Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Location Confirm */}
+      {deleteConfirmLoc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-background border border-destructive/20 p-6 rounded-xl shadow-xl w-full max-w-md space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3 text-destructive"><AlertTriangle className="h-6 w-6" /><h3 className="text-lg font-bold">Delete Location?</h3></div>
+            <div className="text-xs text-destructive bg-destructive/10 border border-destructive/25 p-3 rounded space-y-1">
+              <p className="font-semibold">This will permanently delete:</p>
+              <ul className="list-disc pl-4 space-y-0.5">
+                <li>{deleteConfirmLoc.subLocations.length} Associated Departments</li>
+                <li>{deleteConfirmLoc.warehouses.length} Associated Warehouses</li>
+              </ul>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDeleteConfirmLoc(null)}>Cancel</Button>
+              <Button variant="destructive" onClick={handleConfirmDeleteLocation} disabled={isDeletingLoc}>{isDeletingLoc ? 'Deleting...' : 'Confirm Delete'}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Department */}
+      {isAddSubOpen && selectedLoc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-background border border-primary/20 p-6 rounded-xl shadow-xl w-full max-w-md space-y-4 animate-in zoom-in-95 duration-200">
+            <h3 className="text-lg font-bold text-primary">Add Department</h3>
+            <form onSubmit={handleAddSub} className="space-y-4">
+              <div className="space-y-2"><Label>Department Name</Label><Input placeholder="e.g. IT Support" value={newSubName} onChange={e => setNewSubName(e.target.value)} required /></div>
+              <div className="space-y-2"><Label>Cost Center Code (Optional)</Label><Input placeholder="e.g. CC-101" value={newSubCost} onChange={e => setNewSubCost(e.target.value)} /></div>
+              <div className="bg-primary/5 p-3 rounded-lg border border-primary/10 flex items-start gap-2.5 text-xs text-muted-foreground">
+                <Info className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                <div><span className="font-semibold text-primary block mb-0.5">What is a Cost Center?</span>A financial tracking code used to allocate IT hardware costs to a specific department for budgeting and accounting audits.</div>
+              </div>
+              <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setIsAddSubOpen(false)}>Cancel</Button><Button type="submit" disabled={isAddingSub}>{isAddingSub ? 'Adding...' : 'Add Department'}</Button></div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Department */}
+      {isEditSubOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-background border border-primary/20 p-6 rounded-xl shadow-xl w-full max-w-md space-y-4 animate-in zoom-in-95 duration-200">
+            <h3 className="text-lg font-bold text-primary">Edit Department</h3>
+            <form onSubmit={handleEditSub} className="space-y-4">
+              <div className="space-y-2"><Label>Department Name</Label><Input value={editSubName} onChange={e => setEditSubName(e.target.value)} required /></div>
+              <div className="space-y-2"><Label>Cost Center Code (Optional)</Label><Input value={editSubCost} onChange={e => setEditSubCost(e.target.value)} /></div>
+              <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setIsEditSubOpen(false)}>Cancel</Button><Button type="submit" disabled={isEditingSub}>{isEditingSub ? 'Saving...' : 'Save Changes'}</Button></div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Department */}
+      {deleteConfirmSub && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-background border border-destructive/20 p-6 rounded-xl shadow-xl w-full max-w-md space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3 text-destructive"><AlertTriangle className="h-6 w-6" /><h3 className="text-lg font-bold">Delete Department?</h3></div>
+            <p className="text-sm text-muted-foreground">Are you sure you want to delete <strong>{deleteConfirmSub.name}</strong>?</p>
+            <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setDeleteConfirmSub(null)}>Cancel</Button><Button variant="destructive" onClick={() => handleDeleteSub(deleteConfirmSub)}>Delete</Button></div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Warehouse */}
+      {isAddWhOpen && selectedLoc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-background border border-primary/20 p-6 rounded-xl shadow-xl w-full max-w-md space-y-4 animate-in zoom-in-95 duration-200">
+            <h3 className="text-lg font-bold text-primary">Add Warehouse</h3>
+            <form onSubmit={handleAddWh} className="space-y-4">
+              <div className="space-y-2"><Label>Warehouse / Zone Name</Label><Input placeholder="e.g. Storage Room B" value={newWhName} onChange={e => setNewWhName(e.target.value)} required /></div>
+              <div className="space-y-2"><Label>Rack Number (Optional)</Label><Input placeholder="e.g. Rack 4A" value={newWhRack} onChange={e => setNewWhRack(e.target.value)} /></div>
+              <div className="bg-primary/5 p-3 rounded-lg border border-primary/10 flex items-start gap-2.5 text-xs text-muted-foreground">
+                <Info className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                <div><span className="font-semibold text-primary block mb-0.5">What is a Rack Number?</span>A locator code (shelf, aisle, or bin ID) within the storage zone to quickly pinpoint where hardware is placed.</div>
+              </div>
+              <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setIsAddWhOpen(false)}>Cancel</Button><Button type="submit" disabled={isAddingWh}>{isAddingWh ? 'Adding...' : 'Add Warehouse'}</Button></div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Warehouse */}
+      {isEditWhOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-background border border-primary/20 p-6 rounded-xl shadow-xl w-full max-w-md space-y-4 animate-in zoom-in-95 duration-200">
+            <h3 className="text-lg font-bold text-primary">Edit Warehouse</h3>
+            <form onSubmit={handleEditWh} className="space-y-4">
+              <div className="space-y-2"><Label>Warehouse / Zone Name</Label><Input value={editWhName} onChange={e => setEditWhName(e.target.value)} required /></div>
+              <div className="space-y-2"><Label>Rack Number (Optional)</Label><Input value={editWhRack} onChange={e => setEditWhRack(e.target.value)} /></div>
+              <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setIsEditWhOpen(false)}>Cancel</Button><Button type="submit" disabled={isEditingWh}>{isEditingWh ? 'Saving...' : 'Save Changes'}</Button></div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Warehouse */}
+      {deleteConfirmWh && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-background border border-destructive/20 p-6 rounded-xl shadow-xl w-full max-w-md space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3 text-destructive"><AlertTriangle className="h-6 w-6" /><h3 className="text-lg font-bold">Delete Warehouse?</h3></div>
+            <p className="text-sm text-muted-foreground">Are you sure you want to delete <strong>{deleteConfirmWh.name}</strong>?</p>
+            <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setDeleteConfirmWh(null)}>Cancel</Button><Button variant="destructive" onClick={() => handleDeleteWh(deleteConfirmWh)}>Delete</Button></div>
+          </div>
+        </div>
+      )}
+
+      {/* Error Alert */}
+      {isErrorOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-background border border-destructive/20 p-6 rounded-xl shadow-xl w-full max-w-md space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3 text-destructive"><AlertCircle className="h-6 w-6" /><h3 className="text-lg font-bold">Action Failed</h3></div>
+            <p className="text-sm text-muted-foreground">{errorMsg}</p>
+            <div className="flex justify-end"><Button variant="outline" className="border-destructive/30 hover:bg-destructive/10 hover:text-destructive" onClick={() => setIsErrorOpen(false)}>Close</Button></div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

@@ -34,6 +34,9 @@ export async function addAsset(data: any) {
     return { success: false, error: 'Serial number already exists' }
   }
 
+  const { data: loc } = await supabase.from('locations').select('name').eq('id', data.locationId).single();
+  const locationName = loc ? loc.name : 'Unknown';
+
   const { error } = await supabase.from('assets').insert({
     laptop_name: data.laptopName,
     serial_number: data.serialNumber,
@@ -41,7 +44,10 @@ export async function addAsset(data: any) {
     storage_type: data.storageType,
     storage_capacity: data.storageCapacity,
     assigned_to: data.assignedTo || null,
-    location: data.location,
+    location: locationName,
+    location_id: data.locationId,
+    sub_location_id: data.subLocationId || null,
+    warehouse_id: data.warehouseId || null,
     status: data.status,
     old_username: data.oldUsername || null,
     purchase_date: data.purchaseDate || null,
@@ -89,6 +95,9 @@ export async function updateAsset(id: string, data: any) {
       ['storage_capacity', 'storageCapacity'],
       ['assigned_to', 'assignedTo'],
       ['location', 'location'],
+      ['location_id', 'locationId'],
+      ['sub_location_id', 'subLocationId'],
+      ['warehouse_id', 'warehouseId'],
       ['status', 'status'],
       ['old_username', 'oldUsername'],
       ['purchase_date', 'purchaseDate'],
@@ -109,6 +118,9 @@ export async function updateAsset(id: string, data: any) {
     if (!hasChanges) changes = null;
   }
 
+  const { data: loc } = await supabase.from('locations').select('name').eq('id', data.locationId).single();
+  const locationName = loc ? loc.name : 'Unknown';
+
   const { error } = await supabase.from('assets').update({
     laptop_name: data.laptopName,
     serial_number: data.serialNumber,
@@ -116,7 +128,10 @@ export async function updateAsset(id: string, data: any) {
     storage_type: data.storageType,
     storage_capacity: data.storageCapacity,
     assigned_to: data.assignedTo || null,
-    location: data.location,
+    location: locationName,
+    location_id: data.locationId,
+    sub_location_id: data.subLocationId || null,
+    warehouse_id: data.warehouseId || null,
     status: data.status,
     old_username: data.oldUsername || null,
     purchase_date: data.purchaseDate || null,
@@ -142,6 +157,18 @@ export async function getAsset(id: string) {
   const { data, error } = await supabase.from('assets').select('*').eq('id', id).single()
   if (error) return null
   
+  let subLocationName = null;
+  let warehouseName = null;
+  
+  if (data.sub_location_id) {
+    const { data: sub } = await supabase.from('sub_locations').select('name').eq('id', data.sub_location_id).single();
+    if (sub) subLocationName = sub.name;
+  }
+  if (data.warehouse_id) {
+    const { data: wh } = await supabase.from('warehouses').select('name').eq('id', data.warehouse_id).single();
+    if (wh) warehouseName = wh.name;
+  }
+  
   // map database fields to form fields
   return {
     id: data.id,
@@ -152,6 +179,11 @@ export async function getAsset(id: string) {
     storageCapacity: data.storage_capacity,
     assignedTo: data.assigned_to,
     location: data.location,
+    locationId: data.location_id,
+    subLocationId: data.sub_location_id,
+    subLocationName,
+    warehouseId: data.warehouse_id,
+    warehouseName,
     status: data.status,
     oldUsername: data.old_username,
     purchaseDate: data.purchase_date,
@@ -238,3 +270,132 @@ export async function checkSerialNumber(serialNumber: string, ignoreId?: string)
   const { data } = await query.single();
   return !data; // returns true if unique (not found), false if exists
 }
+
+// ----------------------------------------------------
+// LOCATION MANAGEMENT SERVER ACTIONS
+// ----------------------------------------------------
+
+export async function addLocation(name: string, address?: string) {
+  const session = await getSession();
+  if (!session) return { success: false, error: 'Unauthorized' };
+
+  const { error } = await supabase.from('locations').insert({
+    company_id: session.company_id,
+    name,
+    address: address || null
+  });
+
+  if (error) {
+    if (error.code === '23505') {
+      return { success: false, error: 'A primary location with this name already exists.' };
+    }
+    return { success: false, error: error.message };
+  }
+
+  return { success: true };
+}
+
+export async function addSubLocation(locationId: string, name: string, costCenterCode?: string) {
+  const { error } = await supabase.from('sub_locations').insert({
+    location_id: locationId,
+    name,
+    cost_center_code: costCenterCode || null
+  });
+
+  if (error) {
+    if (error.code === '23505') {
+      return { success: false, error: 'A sub-location/department with this name already exists for this primary location.' };
+    }
+    return { success: false, error: error.message };
+  }
+
+  return { success: true };
+}
+
+export async function addWarehouse(locationId: string, name: string, rackNumber?: string) {
+  const { error } = await supabase.from('warehouses').insert({
+    location_id: locationId,
+    name,
+    rack_number: rackNumber || null
+  });
+
+  if (error) {
+    if (error.code === '23505') {
+      return { success: false, error: 'A warehouse/storage zone with this name already exists for this primary location.' };
+    }
+    return { success: false, error: error.message };
+  }
+
+  return { success: true };
+}
+
+export async function deleteLocation(locationId: string) {
+  // Check if any assets are linked to this location
+  const { data: linkedAssets } = await supabase.from('assets').select('id').eq('location_id', locationId).limit(1);
+  if (linkedAssets && linkedAssets.length > 0) {
+    return { success: false, error: 'Cannot delete location: assets are currently assigned to this location. Please reassign the assets first.' };
+  }
+
+  const { error } = await supabase.from('locations').delete().eq('id', locationId);
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
+
+export async function deleteSubLocation(id: string) {
+  const { error } = await supabase.from('sub_locations').delete().eq('id', id);
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
+
+export async function deleteWarehouse(id: string) {
+  const { error } = await supabase.from('warehouses').delete().eq('id', id);
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
+
+export async function updateLocation(id: string, name: string, address?: string) {
+  const { error } = await supabase.from('locations').update({
+    name,
+    address: address || null
+  }).eq('id', id);
+
+  if (error) {
+    if (error.code === '23505') {
+      return { success: false, error: 'A primary location with this name already exists.' };
+    }
+    return { success: false, error: error.message };
+  }
+  return { success: true };
+}
+
+export async function updateSubLocation(id: string, name: string, costCenterCode?: string) {
+  const { error } = await supabase.from('sub_locations').update({
+    name,
+    cost_center_code: costCenterCode || null
+  }).eq('id', id);
+
+  if (error) {
+    if (error.code === '23505') {
+      return { success: false, error: 'A sub-location/department with this name already exists for this primary location.' };
+    }
+    return { success: false, error: error.message };
+  }
+  return { success: true };
+}
+
+export async function updateWarehouse(id: string, name: string, rackNumber?: string) {
+  const { error } = await supabase.from('warehouses').update({
+    name,
+    rack_number: rackNumber || null
+  }).eq('id', id);
+
+  if (error) {
+    if (error.code === '23505') {
+      return { success: false, error: 'A warehouse/storage zone with this name already exists for this primary location.' };
+    }
+    return { success: false, error: error.message };
+  }
+  return { success: true };
+}
+
+

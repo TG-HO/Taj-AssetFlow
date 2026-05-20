@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, use, useEffect } from 'react';
+import { useState, use, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -13,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { ArrowLeft, ArrowRight, Save, Check } from "lucide-react";
 import { getAsset, updateAsset, checkSerialNumber } from "../../actions";
-
+import { supabase } from '@/lib/supabase';
 
 const formSchema = z.object({
   // Step 1
@@ -25,7 +26,9 @@ const formSchema = z.object({
   storageCapacity: z.string().min(1, 'Storage capacity is required'),
   // Step 3
   assignedTo: z.string().optional(),
-  location: z.string().min(2, 'Location is required'),
+  locationId: z.string().uuid('Location is required'),
+  subLocationId: z.string().optional().nullable(),
+  warehouseId: z.string().optional().nullable(),
   status: z.enum(['New', 'Refub', 'Used', 'Faulty', 'Snatched', 'Damaged']),
   oldUsername: z.string().optional(),
   // Step 4
@@ -80,7 +83,9 @@ export default function EditAssetPage({ params }: { params: Promise<{ id: string
       storageType: 'SSD',
       storageCapacity: '',
       assignedTo: '',
-      location: '',
+      locationId: '',
+      subLocationId: '',
+      warehouseId: '',
       status: 'New',
       oldUsername: '',
       purchaseDate: '',
@@ -92,12 +97,33 @@ export default function EditAssetPage({ params }: { params: Promise<{ id: string
 
   const statusValue = watch('status');
   const storageTypeValue = watch('storageType');
+  const locationIdValue = watch('locationId');
+
+  const [locationsList, setLocationsList] = useState<any[]>([]);
+  const [subLocationsList, setSubLocationsList] = useState<any[]>([]);
+  const [warehousesList, setWarehousesList] = useState<any[]>([]);
+  const [isLoadingLocs, setIsLoadingLocs] = useState(true);
+
+  const isInitialLoad = useRef(true);
 
   useEffect(() => {
     async function loadData() {
       const data = await getAsset(resolvedParams.id);
       if (data) {
         setAssetData(data);
+        
+        // Fetch locations list
+        const { data: locs } = await supabase.from('locations').select('*').order('name');
+        setLocationsList(locs || []);
+        
+        // Fetch nested sub-locations and warehouses for loaded locationId
+        if (data.locationId) {
+          const { data: subs } = await supabase.from('sub_locations').select('*').eq('location_id', data.locationId).order('name');
+          const { data: whs } = await supabase.from('warehouses').select('*').eq('location_id', data.locationId).order('name');
+          setSubLocationsList(subs || []);
+          setWarehousesList(whs || []);
+        }
+
         reset({
           laptopName: data.laptopName || '',
           serialNumber: data.serialNumber || '',
@@ -105,7 +131,9 @@ export default function EditAssetPage({ params }: { params: Promise<{ id: string
           storageType: (data.storageType as any) || 'SSD',
           storageCapacity: data.storageCapacity || '',
           assignedTo: data.assignedTo || '',
-          location: data.location || '',
+          locationId: data.locationId || '',
+          subLocationId: data.subLocationId || '',
+          warehouseId: data.warehouseId || '',
           status: (data.status as any) || 'New',
           oldUsername: data.oldUsername || '',
           purchaseDate: data.purchaseDate || '',
@@ -113,16 +141,46 @@ export default function EditAssetPage({ params }: { params: Promise<{ id: string
           details: data.details || '',
         });
       }
+      setIsLoadingLocs(false);
       setIsLoading(false);
     }
     loadData();
   }, [resolvedParams.id, reset]);
 
+  useEffect(() => {
+    if (!locationIdValue) {
+      setSubLocationsList([]);
+      setWarehousesList([]);
+      if (!isInitialLoad.current) {
+        setValue('subLocationId', '');
+        setValue('warehouseId', '');
+      }
+      return;
+    }
+    
+    async function loadNested() {
+      const { data: subs } = await supabase.from('sub_locations').select('*').eq('location_id', locationIdValue).order('name');
+      const { data: whs } = await supabase.from('warehouses').select('*').eq('location_id', locationIdValue).order('name');
+      
+      setSubLocationsList(subs || []);
+      setWarehousesList(whs || []);
+      
+      if (!isInitialLoad.current) {
+        setValue('subLocationId', '');
+        setValue('warehouseId', '');
+      } else {
+        isInitialLoad.current = false;
+      }
+    }
+    
+    loadNested();
+  }, [locationIdValue, setValue]);
+
   const processNext = async () => {
     let fieldsToValidate: any[] = [];
     if (currentStep === 0) fieldsToValidate = ['laptopName', 'serialNumber', 'ram'];
     if (currentStep === 1) fieldsToValidate = ['storageType', 'storageCapacity'];
-    if (currentStep === 2) fieldsToValidate = ['assignedTo', 'location', 'status', 'oldUsername'];
+    if (currentStep === 2) fieldsToValidate = ['assignedTo', 'locationId', 'subLocationId', 'warehouseId', 'status', 'oldUsername'];
     
     const isStepValid = await trigger(fieldsToValidate as any);
 
@@ -164,7 +222,12 @@ export default function EditAssetPage({ params }: { params: Promise<{ id: string
 
   const onSubmit = async (data: FormValues) => {
     setIsSubmitting(true);
-    const result = await updateAsset(resolvedParams.id, data);
+    const cleanedData = {
+      ...data,
+      subLocationId: (data.subLocationId === 'none' || data.subLocationId === '') ? null : data.subLocationId,
+      warehouseId: (data.warehouseId === 'none' || data.warehouseId === '') ? null : data.warehouseId,
+    };
+    const result = await updateAsset(resolvedParams.id, cleanedData);
     setIsSubmitting(false);
 
     if (!result.success) {
@@ -323,35 +386,111 @@ export default function EditAssetPage({ params }: { params: Promise<{ id: string
               </div>
 
               {/* STEP 3: Assignment */}
-              <div className={currentStep === 2 ? 'block space-y-4' : 'hidden'}>
-                <div className="space-y-2">
-                  <Label htmlFor="status">Status</Label>
-                  <Select onValueChange={(val: any) => setValue('status', val)} value={watch('status') || ''}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select Status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="New">New</SelectItem>
-                      <SelectItem value="Refub">Refurbished</SelectItem>
-                      <SelectItem value="Used">Used</SelectItem>
-                      <SelectItem value="Faulty">Faulty</SelectItem>
-                      <SelectItem value="Snatched">Snatched</SelectItem>
-                      <SelectItem value="Damaged">Damaged (Dead)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {errors.status && <p className="text-sm text-destructive">{errors.status.message}</p>}
-                </div>
-
+              <div className={currentStep === 2 ? 'block space-y-6' : 'hidden'}>
                 <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="status">Status</Label>
+                    <Select onValueChange={(val: any) => setValue('status', val)} value={watch('status') || ''}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select Status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="New">New</SelectItem>
+                        <SelectItem value="Refub">Refurbished</SelectItem>
+                        <SelectItem value="Used">Used</SelectItem>
+                        <SelectItem value="Faulty">Faulty</SelectItem>
+                        <SelectItem value="Snatched">Snatched</SelectItem>
+                        <SelectItem value="Damaged">Damaged (Dead)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {errors.status && <p className="text-sm text-destructive">{errors.status.message}</p>}
+                  </div>
                   <div className="space-y-2">
                     <Label htmlFor="assignedTo">Assigned To (Username) <span className="text-muted-foreground font-normal">(Optional)</span></Label>
                     <Input id="assignedTo" placeholder="e.g. john.doe" {...register('assignedTo')} />
                   </div>
+                </div>
+
+                <div className="space-y-4 border border-muted/50 p-4 rounded-lg bg-muted/5">
+                  <h4 className="text-sm font-semibold text-primary">Location Hierarchy Assignment</h4>
+                  
                   <div className="space-y-2">
-                    <Label htmlFor="location">Location</Label>
-                    <Input id="location" placeholder="e.g. Karachi Office" {...register('location')} />
-                    {errors.location && <p className="text-sm text-destructive">{errors.location.message}</p>}
+                    <Label htmlFor="locationId">Primary Location</Label>
+                    {isLoadingLocs ? (
+                      <div className="text-xs text-muted-foreground flex items-center gap-2 py-1.5">
+                        <span className="animate-spin rounded-full h-3.5 w-3.5 border-t-2 border-primary"></span>
+                        Loading locations...
+                      </div>
+                    ) : (
+                      <Select onValueChange={(val: any) => setValue('locationId', val)} value={watch('locationId') || ''}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select Primary Location" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {locationsList.map(loc => (
+                            <SelectItem key={loc.id} value={loc.id}>{loc.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    {errors.locationId && <p className="text-sm text-destructive">{errors.locationId.message}</p>}
                   </div>
+
+                  {locationIdValue && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                      
+                      {/* Department / Sub-location */}
+                      <div className="space-y-2">
+                        <Label htmlFor="subLocationId">Department / Sub-Location</Label>
+                        {subLocationsList.length === 0 ? (
+                          <div className="text-xs text-muted-foreground p-3 border border-dashed rounded bg-background flex flex-col gap-1">
+                            <span>No departments configured.</span>
+                            <Link href="/settings?tab=locations" className="text-primary hover:underline font-semibold">
+                              [Configure Departments]
+                            </Link>
+                          </div>
+                        ) : (
+                          <Select onValueChange={(val: any) => setValue('subLocationId', val)} value={watch('subLocationId') || ''}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select Department" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">None / Unassigned</SelectItem>
+                              {subLocationsList.map(sub => (
+                                <SelectItem key={sub.id} value={sub.id}>{sub.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </div>
+
+                      {/* Warehouse */}
+                      <div className="space-y-2">
+                        <Label htmlFor="warehouseId">Warehouse / Storage Zone</Label>
+                        {warehousesList.length === 0 ? (
+                          <div className="text-xs text-muted-foreground p-3 border border-dashed rounded bg-background flex flex-col gap-1">
+                            <span>No warehouses configured.</span>
+                            <Link href="/settings?tab=locations" className="text-primary hover:underline font-semibold">
+                              [Configure Warehouses]
+                            </Link>
+                          </div>
+                        ) : (
+                          <Select onValueChange={(val: any) => setValue('warehouseId', val)} value={watch('warehouseId') || ''}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select Warehouse" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">None / Unassigned</SelectItem>
+                              {warehousesList.map(wh => (
+                                <SelectItem key={wh.id} value={wh.id}>{wh.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </div>
+
+                    </div>
+                  )}
                 </div>
 
                 {statusValue === 'Used' && (
