@@ -42,6 +42,33 @@ export function TenantSessionProvider({ children }: { children: React.ReactNode 
   const router = useRouter();
 
   useEffect(() => {
+    try {
+      const saved = localStorage.getItem('color_theme') || 'blue';
+      const themes: Record<string, string> = {
+        blue: 'oklch(0.45 0.18 250)',
+        default: 'oklch(0.35 0.12 340)',
+        emerald: 'oklch(0.50 0.16 162)',
+        violet: 'oklch(0.48 0.22 292)',
+        amber: 'oklch(0.65 0.18 70)',
+      };
+      const fgs: Record<string, string> = {
+        blue: 'oklch(0.985 0 0)',
+        default: 'oklch(0.985 0 0)',
+        emerald: 'oklch(0.985 0 0)',
+        violet: 'oklch(0.985 0 0)',
+        amber: 'oklch(0.145 0 0)',
+      };
+      const theme = themes[saved];
+      const fg = fgs[saved];
+      if (theme) {
+        document.documentElement.style.setProperty('--primary', theme);
+        document.documentElement.style.setProperty('--primary-foreground', fg);
+        document.documentElement.style.setProperty('--ring', theme);
+      }
+    } catch (e) {}
+  }, []);
+
+  useEffect(() => {
     const loadSession = async () => {
       try {
         const storedProfile = localStorage.getItem('tenant_session');

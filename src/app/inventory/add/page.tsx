@@ -23,9 +23,13 @@ import {
   Loader2,
   ClipboardList,
   Database,
+  Upload,
+  FileArchive
 } from "lucide-react";
 import { supabase } from '@/lib/supabase';
 import { getCategories, checkNewSerialNumber, addInventoryItem } from '../item-actions';
+import { registerSoftwareInstaller } from '../../software-vault/actions';
+import { useTenantSession } from '@/lib/TenantSessionContext';
 
 type Classification = 'Asset' | 'Consumable' | 'Software';
 interface Category { id: string; name: string; classification: Classification; }
@@ -59,6 +63,7 @@ function selectVal(setter: (v: string) => void) {
 
 export default function AddAssetPage() {
   const router = useRouter();
+  const { companyId } = useTenantSession();
   const [step, setStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
@@ -95,6 +100,65 @@ export default function AddAssetPage() {
 
   // Shared
   const [notes, setNotes] = useState('');
+
+  // Software installer upload state
+  const [isDragging, setIsDragging] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadError, setUploadError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Dynamic upload limit from localStorage
+  const [maxBytes, setMaxBytes] = useState(500 * 1024 * 1024);
+  const [uploadLimitLabel, setUploadLimitLabel] = useState('500MB');
+
+  // Software upload progress
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
+
+  useEffect(() => {
+    const savedLimit = localStorage.getItem('software_upload_limit') || '500';
+    const limitMb = parseInt(savedLimit, 10) || 500;
+    setMaxBytes(limitMb * 1024 * 1024);
+    setUploadLimitLabel(limitMb >= 1000 ? `${(limitMb / 1000).toFixed(0)}GB` : `${limitMb}MB`);
+  }, []);
+
+  const fmtSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const ALLOWED_TYPES = ['.exe', '.msi', '.zip', '.dmg', '.pkg', '.tar.gz'];
+
+  const validateFile = (file: File): string | null => {
+    if (file.size > maxBytes) return `File exceeds ${uploadLimitLabel} limit.`;
+    const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+    const valid = ALLOWED_TYPES.some(t => file.name.toLowerCase().endsWith(t.replace('.', '')));
+    if (!valid && !file.name.toLowerCase().endsWith('gz')) return `Unsupported type. Allowed: ${ALLOWED_TYPES.join(', ')}`;
+    return null;
+  };
+
+  const handleFileDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      const err = validateFile(file);
+      if (err) { setUploadError(err); return; }
+      setUploadFile(file);
+      setUploadError('');
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const err = validateFile(file);
+      if (err) { setUploadError(err); return; }
+      setUploadFile(file);
+      setUploadError('');
+    }
+  };
 
   // Step 3 — Location
   const [locationsList, setLocationsList] = useState<any[]>([]);
@@ -154,20 +218,12 @@ export default function AddAssetPage() {
     loadNested();
   }, [locationId]);
 
-  const handleCategorySelect = (catId: string | null) => {
-    if (!catId) return;
-    const cat = categories.find(c => c.id === catId);
-    if (!cat) return;
-    setSelectedCategoryId(catId);
-    setSelectedClassification(cat.classification);
-    if (!itemName) setItemName(cat.name);
-  };
-
   // Validation per step
   const validateStep = async (): Promise<boolean> => {
     setGlobalError(null);
     if (step === 0) {
-      if (!selectedCategoryId) { setGlobalError('Please select an item category.'); return false; }
+      if (!selectedClassification) { setGlobalError('Please select an item category.'); return false; }
+      if (!selectedCategoryId) { setGlobalError('Please select a sub category.'); return false; }
       if (!itemName.trim()) { setGlobalError('Please enter an item name.'); return false; }
       return true;
     }
@@ -186,6 +242,7 @@ export default function AddAssetPage() {
       }
       if (selectedClassification === 'Software') {
         if (totalSeats < 1) { setGlobalError('Total seats must be at least 1.'); return false; }
+        if (uploadFile && !softwareVersion.trim()) { setGlobalError('Version is required when uploading an installer file.'); return false; }
       }
       return true;
     }
@@ -224,8 +281,8 @@ export default function AddAssetPage() {
       name: itemName.trim(),
       status_state: statusState,
       location_id: locationId,
-      sub_location_id: (subLocationId && subLocationId !== 'none') ? subLocationId : null,
-      warehouse_id: (warehouseId && warehouseId !== 'none') ? warehouseId : null,
+      sub_location_id: (selectedClassification !== 'Software' && subLocationId && subLocationId !== 'none') ? subLocationId : null,
+      warehouse_id: (selectedClassification !== 'Software' && warehouseId && warehouseId !== 'none') ? warehouseId : null,
       assigned_to: assignedTo || undefined,
       notes: notes || undefined,
       serial_number: selectedClassification === 'Asset' ? serialNumber : undefined,
@@ -235,9 +292,93 @@ export default function AddAssetPage() {
       minimum_safety_stock: selectedClassification === 'Consumable' ? minSafetyStock : 0,
       specs,
     });
+
+    if (!result.success) {
+      setGlobalError(result.error || 'Failed to save item.');
+      setIsSubmitting(false);
+      return;
+    }
+
+    const itemId = result.itemId;
+
+    if (selectedClassification === 'Software' && uploadFile && itemId) {
+      setIsUploading(true);
+      setUploadProgress(0);
+
+      try {
+        const bucket = 'software-binaries';
+        const activeCompanyId = companyId || 'default';
+        const filePath = `${activeCompanyId}/${itemId}/${Date.now()}_${uploadFile.name}`;
+
+        const uploadPromise = new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://mock-url.supabase.co';
+          const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || 'mock-anon-key';
+          const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${filePath}`;
+
+          supabase.auth.getSession().then(({ data: { session } }) => {
+            const token = session?.access_token || supabaseAnonKey;
+            
+            xhr.open('POST', uploadUrl, true);
+            xhr.setRequestHeader('apikey', supabaseAnonKey);
+            xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+            xhr.upload.onprogress = (event) => {
+              if (event.lengthComputable) {
+                const pct = Math.round((event.loaded / event.total) * 100);
+                setUploadProgress(pct);
+              }
+            };
+
+            xhr.onload = () => {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                resolve();
+              } else {
+                let errorMsg = 'Storage upload failed.';
+                try {
+                  const res = JSON.parse(xhr.responseText);
+                  errorMsg = res.message || errorMsg;
+                } catch (e) {}
+                reject(new Error(errorMsg));
+              }
+            };
+
+            xhr.onerror = () => {
+              reject(new Error('Network error during upload.'));
+            };
+
+            xhr.send(uploadFile);
+          }).catch((err) => {
+            reject(new Error(`Failed to retrieve session: ${err.message}`));
+          });
+        });
+
+        await uploadPromise;
+
+        const registerResult = await registerSoftwareInstaller(
+          itemId,
+          uploadFile.name,
+          filePath,
+          uploadFile.size,
+          softwareVersion || '1.0'
+        );
+
+        if (!registerResult.success) {
+          await supabase.storage.from(bucket).remove([filePath]);
+          throw new Error(registerResult.error || 'Failed to register installer in database.');
+        }
+      } catch (uploadErr: any) {
+        setGlobalError(`Item created successfully, but installer upload failed: ${uploadErr.message}. You can retry uploading the installer from the software vault page.`);
+        setIsUploading(false);
+        setIsSubmitting(false);
+        setTimeout(() => setUploadProgress(0), 1000);
+        return;
+      }
+      setIsUploading(false);
+    }
+
     setIsSubmitting(false);
-    if (!result.success) { setGlobalError(result.error || 'Failed to save item.'); }
-    else { router.push('/inventory'); }
+    router.push('/inventory');
   };
 
   const groupedCategories = categories.reduce<Record<string, Category[]>>((acc, cat) => {
@@ -316,75 +457,113 @@ export default function AddAssetPage() {
           {/* ══ STEP 1: Classification & Type ══════════════════════ */}
           {step === 0 && (
             <div className="space-y-5">
-              {(['Asset', 'Consumable', 'Software'] as Classification[]).map(cls => {
-                const meta = CLASSIFICATION_META[cls];
-                const Icon = meta.icon;
-                return (
-                  <div key={cls} className={`p-3 rounded-xl border flex items-center gap-2.5 ${meta.bg}`}>
-                    <Icon size={16} className={meta.color} />
-                    <div>
-                      <p className={`text-sm font-bold ${meta.color}`}>{cls}</p>
-                      <p className="text-xs text-muted-foreground">{meta.desc}</p>
-                    </div>
-                  </div>
-                );
-              })}
-
               <div className="space-y-2">
-                <Label htmlFor="category">Item Category <span className="text-destructive">*</span></Label>
-                {isCatsLoading ? (
-                  <div className="flex items-center gap-2 text-muted-foreground text-sm py-2">
-                    <Loader2 className="h-4 w-4 animate-spin" /> Loading categories...
-                  </div>
-                ) : sqlNotRun ? (
-                  <div className="text-sm text-muted-foreground p-3 border border-dashed rounded-lg">
-                    Run the SQL script first to load categories.
-                  </div>
-                ) : (
-                  <Select value={selectedCategoryId} onValueChange={handleCategorySelect}>
-                    <SelectTrigger id="category" className="w-full">
-                      <SelectValue placeholder="Select a category..." />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-72">
-                      {(['Asset', 'Consumable', 'Software'] as Classification[]).map(cls => (
-                        groupedCategories[cls]?.length > 0 && (
-                          <div key={cls}>
-                            <div className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">{cls}s</div>
-                            {groupedCategories[cls].map(cat => (
-                              <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
-                            ))}
-                          </div>
-                        )
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-                {selectedCategory && (
-                  <div className="flex items-center gap-2 mt-1">
-                    <Badge className={`text-xs font-semibold border-none ${
-                      selectedCategory.classification === 'Asset' ? 'bg-blue-100 text-blue-700'
-                      : selectedCategory.classification === 'Consumable' ? 'bg-amber-100 text-amber-700'
-                      : 'bg-violet-100 text-violet-700'
-                    }`}>{selectedCategory.classification}</Badge>
-                    <span className="text-xs text-muted-foreground">classification selected</span>
-                  </div>
-                )}
+                <Label htmlFor="item-classification">Item Category <span className="text-destructive">*</span></Label>
+                <Select
+                  value={selectedClassification || ''}
+                  onValueChange={(val) => {
+                    if (val) {
+                      const newCls = val as Classification;
+                      setSelectedClassification(newCls);
+                      setSelectedCategoryId('');
+                      setUploadFile(null);
+                      setUploadError('');
+                    }
+                  }}
+                  items={[
+                    { value: 'Asset', label: 'Assets' },
+                    { value: 'Consumable', label: 'Consumables' },
+                    { value: 'Software', label: 'Software' }
+                  ]}
+                >
+                  <SelectTrigger id="item-classification" className="w-full">
+                    <SelectValue placeholder="Select Item Category (Assets, Consumables, Software)..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Asset">Assets</SelectItem>
+                    <SelectItem value="Consumable">Consumables</SelectItem>
+                    <SelectItem value="Software">Software</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
+
+              {selectedClassification && (
+                <div className={`p-4 rounded-xl border flex items-start gap-3 transition-all duration-300 animate-in fade-in slide-in-from-top-2 ${CLASSIFICATION_META[selectedClassification].bg}`}>
+                  {(() => {
+                    const Icon = CLASSIFICATION_META[selectedClassification].icon;
+                    return <Icon size={18} className={`${CLASSIFICATION_META[selectedClassification].color} shrink-0 mt-0.5`} />;
+                  })()}
+                  <div>
+                    <p className={`text-sm font-bold ${CLASSIFICATION_META[selectedClassification].color}`}>
+                      {selectedClassification === 'Asset' ? 'Assets' : selectedClassification === 'Consumable' ? 'Consumables' : 'Software'}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                      {CLASSIFICATION_META[selectedClassification].desc}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {selectedClassification && (
+                <div className="space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <Label htmlFor="category">Sub Category <span className="text-destructive">*</span></Label>
+                  {isCatsLoading ? (
+                    <div className="flex items-center gap-2 text-muted-foreground text-sm py-2">
+                      <Loader2 className="h-4 w-4 animate-spin" /> Loading categories...
+                    </div>
+                  ) : sqlNotRun ? (
+                    <div className="text-sm text-muted-foreground p-3 border border-dashed rounded-lg">
+                      Run the SQL script first to load categories.
+                    </div>
+                  ) : (
+                    <Select
+                      value={selectedCategoryId}
+                      onValueChange={(catId) => {
+                        if (catId) {
+                          setSelectedCategoryId(catId);
+                          const cat = categories.find(c => c.id === catId);
+                          if (cat && !itemName) {
+                            setItemName(cat.name);
+                          }
+                        }
+                      }}
+                      items={categories
+                        .filter(c => c.classification === selectedClassification)
+                        .map(cat => ({ value: cat.id, label: cat.name }))}
+                    >
+                      <SelectTrigger id="category" className="w-full">
+                        <SelectValue placeholder="Select Sub Category..." />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-72">
+                        {categories
+                          .filter(c => c.classification === selectedClassification)
+                          .map(cat => (
+                            <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label htmlFor="item-name">Item Name / Description <span className="text-destructive">*</span></Label>
                 <Input id="item-name" placeholder="e.g. Dell Latitude 5420 / Microsoft Office 365" value={itemName} onChange={e => setItemName(e.target.value)} />
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="status">Condition / Status</Label>
-                <Select value={statusState} onValueChange={selectVal(setStatusState)}>
-                  <SelectTrigger id="status"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {STATUS_OPTIONS.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
+              {selectedClassification !== 'Software' && (
+                <div className="space-y-2">
+                  <Label htmlFor="status">Condition / Status</Label>
+                  <Select value={statusState} onValueChange={selectVal(setStatusState)} items={STATUS_OPTIONS}>
+                    <SelectTrigger id="status">
+                      <SelectValue placeholder="Select Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {STATUS_OPTIONS.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
           )}
 
@@ -414,21 +593,21 @@ export default function AddAssetPage() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="space-y-2">
                       <Label>RAM</Label>
-                      <Select value={ram} onValueChange={selectVal(setRam)}>
+                      <Select value={ram} onValueChange={selectVal(setRam)} items={RAM_OPTIONS.map(r => ({ value: r, label: r }))}>
                         <SelectTrigger><SelectValue placeholder="Select RAM" /></SelectTrigger>
                         <SelectContent>{RAM_OPTIONS.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
                       </Select>
                     </div>
                     <div className="space-y-2">
                       <Label>Storage Type</Label>
-                      <Select value={storageType} onValueChange={selectVal(setStorageType)}>
+                      <Select value={storageType} onValueChange={selectVal(setStorageType)} items={STORAGE_TYPES.map(t => ({ value: t, label: t }))}>
                         <SelectTrigger><SelectValue placeholder="Select Type" /></SelectTrigger>
                         <SelectContent>{STORAGE_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
                       </Select>
                     </div>
                     <div className="space-y-2">
                       <Label>Storage Capacity</Label>
-                      <Select value={storageCapacity} onValueChange={selectVal(setStorageCapacity)}>
+                      <Select value={storageCapacity} onValueChange={selectVal(setStorageCapacity)} items={STORAGE_OPTIONS.map(s => ({ value: s, label: s }))}>
                         <SelectTrigger><SelectValue placeholder="Select Size" /></SelectTrigger>
                         <SelectContent>{STORAGE_OPTIONS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
                       </Select>
@@ -470,7 +649,7 @@ export default function AddAssetPage() {
                       <Input id="license-key" placeholder="e.g. XXXXX-XXXXX-XXXXX" value={licenseKey} onChange={e => setLicenseKey(e.target.value)} />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="sw-version">Version <span className="text-muted-foreground font-normal">(Optional)</span></Label>
+                      <Label htmlFor="sw-version">Version <span className="text-muted-foreground font-normal">({uploadFile ? 'Required' : 'Optional'})</span></Label>
                       <Input id="sw-version" placeholder="e.g. 2024 / v11.0" value={softwareVersion} onChange={e => setSoftwareVersion(e.target.value)} />
                     </div>
                   </div>
@@ -485,9 +664,52 @@ export default function AddAssetPage() {
                       <Input id="expiry" type="date" value={expiryDate} onChange={e => setExpiryDate(e.target.value)} />
                     </div>
                   </div>
+
+                  <div className="space-y-4 pt-4 border-t">
+                    <div className="flex items-center gap-2">
+                      <Upload size={16} className="text-primary" />
+                      <Label className="font-semibold text-sm">Upload Installer Binary <span className="text-muted-foreground font-normal">(Optional)</span></Label>
+                    </div>
+                    <p className="text-xs text-muted-foreground -mt-2">
+                      Upload the installer file (.exe, .msi, .zip, .dmg) to the secure vault directly.
+                    </p>
+
+                    <div
+                      onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+                      onDragLeave={() => setIsDragging(false)}
+                      onDrop={handleFileDrop}
+                      onClick={() => fileInputRef.current?.click()}
+                      className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all duration-200 ${
+                        isDragging ? 'border-primary bg-primary/5 scale-[1.01]' : uploadFile ? 'border-green-400 bg-green-50' : 'border-muted hover:border-primary/50 hover:bg-muted/30'
+                      }`}
+                    >
+                      <input ref={fileInputRef} type="file" className="hidden" accept=".exe,.msi,.zip,.dmg,.pkg,.gz" onChange={handleFileSelect} />
+                      {uploadFile ? (
+                        <div className="space-y-2">
+                          <Check className="h-8 w-8 text-green-600 mx-auto animate-in zoom-in" />
+                          <p className="font-semibold text-green-700 text-sm truncate max-w-xs mx-auto">{uploadFile.name}</p>
+                          <p className="text-xs text-muted-foreground">{fmtSize(uploadFile.size)}</p>
+                          <button onClick={e => { e.stopPropagation(); setUploadFile(null); }} className="text-xs text-muted-foreground hover:text-destructive underline font-semibold">Remove File</button>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <FileArchive className="h-8 w-8 text-muted-foreground/50 mx-auto" />
+                          <p className="text-sm font-medium text-muted-foreground">Drag & drop installer here</p>
+                          <p className="text-xs text-muted-foreground/60">or click to browse — max {uploadLimitLabel}</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {uploadError && (
+                      <div className="flex items-center gap-2 text-xs text-destructive bg-destructive/10 border border-destructive/20 px-3 py-2 rounded-lg">
+                        <AlertCircle size={13} />{uploadError}
+                      </div>
+                    )}
+                  </div>
+
                   <div className="bg-violet-50 border border-violet-200 p-3 rounded-xl flex items-start gap-2.5 text-xs text-violet-700">
                     <Info size={14} className="shrink-0 mt-0.5" />
-                    <p>License keys are stored securely and visible only to administrators.</p>
+                    <p>License keys and installer files are stored securely and visible only to authorized users.</p>
                   </div>
                 </>
               )}
@@ -510,13 +732,19 @@ export default function AddAssetPage() {
                   {isLocLoading ? (
                     <div className="flex items-center gap-2 text-sm text-muted-foreground py-1"><Loader2 className="h-4 w-4 animate-spin" />Loading...</div>
                   ) : (
-                    <Select value={locationId} onValueChange={selectVal(setLocationId)}>
-                      <SelectTrigger><SelectValue placeholder="Select Primary Location" /></SelectTrigger>
+                    <Select
+                      value={locationId}
+                      onValueChange={selectVal(setLocationId)}
+                      items={locationsList.map(l => ({ value: l.id, label: l.name }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select Primary Location" />
+                      </SelectTrigger>
                       <SelectContent>{locationsList.map(loc => <SelectItem key={loc.id} value={loc.id}>{loc.name}</SelectItem>)}</SelectContent>
                     </Select>
                   )}
                 </div>
-                {locationId && (
+                {locationId && selectedClassification !== 'Software' && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in duration-300">
                     <div className="space-y-2">
                       <Label>Department / Sub-Location</Label>
@@ -525,8 +753,17 @@ export default function AddAssetPage() {
                           No departments. <Link href="/settings?tab=locations" className="text-primary hover:underline font-semibold">Configure</Link>
                         </div>
                       ) : (
-                        <Select value={subLocationId} onValueChange={selectVal(setSubLocationId)}>
-                          <SelectTrigger><SelectValue placeholder="None / Unassigned" /></SelectTrigger>
+                        <Select
+                          value={subLocationId}
+                          onValueChange={selectVal(setSubLocationId)}
+                          items={[
+                            { value: 'none', label: 'None / Unassigned' },
+                            ...subLocationsList.map(s => ({ value: s.id, label: s.name }))
+                          ]}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="None / Unassigned" />
+                          </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="none">None / Unassigned</SelectItem>
                             {subLocationsList.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
@@ -541,8 +778,17 @@ export default function AddAssetPage() {
                           No warehouses. <Link href="/settings?tab=locations" className="text-primary hover:underline font-semibold">Configure</Link>
                         </div>
                       ) : (
-                        <Select value={warehouseId} onValueChange={selectVal(setWarehouseId)}>
-                          <SelectTrigger><SelectValue placeholder="None / Unassigned" /></SelectTrigger>
+                        <Select
+                          value={warehouseId}
+                          onValueChange={selectVal(setWarehouseId)}
+                          items={[
+                            { value: 'none', label: 'None / Unassigned' },
+                            ...warehousesList.map(w => ({ value: w.id, label: w.name }))
+                          ]}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="None / Unassigned" />
+                          </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="none">None / Unassigned</SelectItem>
                             {warehousesList.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
@@ -565,14 +811,17 @@ export default function AddAssetPage() {
                   {(() => { const Icon = CLASSIFICATION_META[selectedClassification!].icon; return <Icon size={20} className={CLASSIFICATION_META[selectedClassification!].color} />; })()}
                   <div>
                     <p className={`font-bold text-sm ${CLASSIFICATION_META[selectedClassification!].color}`}>{selectedCategory.name}</p>
-                    <p className="text-xs text-muted-foreground">{selectedClassification} — {statusState}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {selectedClassification}
+                      {selectedClassification !== 'Software' ? ` — ${statusState}` : ''}
+                    </p>
                   </div>
                 </div>
               )}
               <div className="rounded-xl border border-muted/50 overflow-hidden divide-y divide-muted/40">
                 {[
                   { label: 'Item Name', value: itemName },
-                  { label: 'Status', value: statusState },
+                  ...(selectedClassification !== 'Software' ? [{ label: 'Status', value: statusState }] : []),
                   ...(selectedClassification === 'Asset' ? [
                     { label: 'Serial Number', value: serialNumber || '—' },
                     { label: 'Model Number', value: modelNumber || '—' },
@@ -590,10 +839,11 @@ export default function AddAssetPage() {
                     { label: 'Version', value: softwareVersion || '—' },
                     { label: 'Total Seats', value: String(totalSeats) },
                     { label: 'Expiry Date', value: expiryDate || 'N/A' },
+                    ...(uploadFile ? [{ label: 'Installer Binary', value: `${uploadFile.name} (${fmtSize(uploadFile.size)})` }] : []),
                   ] : []),
                   { label: 'Location', value: locationName || '—' },
-                  ...(subLocationId && subLocationId !== 'none' ? [{ label: 'Department', value: subName }] : []),
-                  ...(warehouseId && warehouseId !== 'none' ? [{ label: 'Warehouse', value: whName }] : []),
+                  ...(selectedClassification !== 'Software' && subLocationId && subLocationId !== 'none' ? [{ label: 'Department', value: subName }] : []),
+                  ...(selectedClassification !== 'Software' && warehouseId && warehouseId !== 'none' ? [{ label: 'Warehouse', value: whName }] : []),
                   ...(notes ? [{ label: 'Notes', value: notes }] : []),
                 ].map(row => (
                   <div key={row.label} className="flex justify-between items-start px-4 py-2.5 hover:bg-muted/10 text-sm">
@@ -606,19 +856,38 @@ export default function AddAssetPage() {
           )}
         </CardContent>
 
-        <CardFooter className="flex justify-between border-t p-6">
-          <Button type="button" variant="outline" onClick={handleBack} disabled={step === 0 || isSubmitting || isCheckingSerial}>
-            <ArrowLeft className="mr-2 h-4 w-4" /> Previous
-          </Button>
-          {step < STEPS.length - 1 ? (
-            <Button type="button" onClick={handleNext} disabled={isCheckingSerial || sqlNotRun}>
-              {isCheckingSerial ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Checking...</> : <>Next <ArrowRight className="ml-2 h-4 w-4" /></>}
-            </Button>
-          ) : (
-            <Button type="button" onClick={handleSubmit} disabled={isSubmitting}>
-              {isSubmitting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Saving...</> : <><Save className="mr-2 h-4 w-4" />Save to Inventory</>}
-            </Button>
+        <CardFooter className="flex flex-col gap-4 border-t p-6">
+          {isUploading && (
+            <div className="w-full space-y-2 animate-in fade-in">
+              <div className="flex justify-between text-xs text-muted-foreground font-semibold">
+                <span>Uploading Installer Binary...</span>
+                <span>{uploadProgress}%</span>
+              </div>
+              <div className="h-2 bg-muted rounded-full overflow-hidden">
+                <div className="h-full bg-primary rounded-full transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
+              </div>
+            </div>
           )}
+          <div className="flex justify-between w-full">
+            <Button type="button" variant="outline" onClick={handleBack} disabled={step === 0 || isSubmitting || isCheckingSerial || isUploading}>
+              <ArrowLeft className="mr-2 h-4 w-4" /> Previous
+            </Button>
+            {step < STEPS.length - 1 ? (
+              <Button type="button" onClick={handleNext} disabled={isCheckingSerial || sqlNotRun}>
+                {isCheckingSerial ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Checking...</> : <>Next <ArrowRight className="ml-2 h-4 w-4" /></>}
+              </Button>
+            ) : (
+              <Button type="button" onClick={handleSubmit} disabled={isSubmitting || isUploading}>
+                {isUploading ? (
+                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Uploading...</>
+                ) : isSubmitting ? (
+                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Saving...</>
+                ) : (
+                  <><Save className="mr-2 h-4 w-4" />Save to Inventory</>
+                )}
+              </Button>
+            )}
+          </div>
         </CardFooter>
       </Card>
     </div>

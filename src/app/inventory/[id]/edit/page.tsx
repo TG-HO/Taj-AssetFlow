@@ -323,7 +323,17 @@ export default function EditAssetPage({ params }: { params: Promise<{ id: string
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="ram">RAM</Label>
-                  <Select onValueChange={(val: any) => setValue('ram', val)} value={watch('ram') || ''}>
+                  <Select
+                    onValueChange={(val: any) => setValue('ram', val)}
+                    value={watch('ram') || ''}
+                    items={[
+                      { value: '4GB', label: '4GB' },
+                      { value: '8GB', label: '8GB' },
+                      { value: '12GB', label: '12GB' },
+                      { value: '16GB', label: '16GB' },
+                      { value: '32GB', label: '32GB' }
+                    ]}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select RAM" />
                     </SelectTrigger>
@@ -368,7 +378,18 @@ export default function EditAssetPage({ params }: { params: Promise<{ id: string
 
                 <div className="space-y-2">
                   <Label htmlFor="storageCapacity">Storage Capacity</Label>
-                  <Select onValueChange={(val: any) => setValue('storageCapacity', val)} value={watch('storageCapacity') || ''}>
+                  <Select
+                    onValueChange={(val: any) => setValue('storageCapacity', val)}
+                    value={watch('storageCapacity') || ''}
+                    items={[
+                      { value: '256GB', label: '256GB' },
+                      { value: '512GB', label: '512GB' },
+                      { value: '1TB', label: '1TB' },
+                      { value: '2TB', label: '2TB' },
+                      { value: '3TB', label: '3TB' },
+                      { value: '4TB', label: '4TB' }
+                    ]}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select Capacity" />
                     </SelectTrigger>
@@ -390,7 +411,18 @@ export default function EditAssetPage({ params }: { params: Promise<{ id: string
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="status">Status</Label>
-                    <Select onValueChange={(val: any) => setValue('status', val)} value={watch('status') || ''}>
+                    <Select
+                      onValueChange={(val: any) => setValue('status', val)}
+                      value={watch('status') || ''}
+                      items={[
+                        { value: 'New', label: 'New' },
+                        { value: 'Refub', label: 'Refurbished' },
+                        { value: 'Used', label: 'Used' },
+                        { value: 'Faulty', label: 'Faulty' },
+                        { value: 'Snatched', label: 'Snatched' },
+                        { value: 'Damaged', label: 'Damaged (Dead)' }
+                      ]}
+                    >
                       <SelectTrigger>
                         <SelectValue placeholder="Select Status" />
                       </SelectTrigger>
@@ -422,7 +454,11 @@ export default function EditAssetPage({ params }: { params: Promise<{ id: string
                         Loading locations...
                       </div>
                     ) : (
-                      <Select onValueChange={(val: any) => setValue('locationId', val)} value={watch('locationId') || ''}>
+                      <Select
+                        onValueChange={(val: any) => setValue('locationId', val)}
+                        value={watch('locationId') || ''}
+                        items={locationsList.map(loc => ({ value: loc.id, label: loc.name }))}
+                      >
                         <SelectTrigger>
                           <SelectValue placeholder="Select Primary Location" />
                         </SelectTrigger>
@@ -450,7 +486,14 @@ export default function EditAssetPage({ params }: { params: Promise<{ id: string
                             </Link>
                           </div>
                         ) : (
-                          <Select onValueChange={(val: any) => setValue('subLocationId', val)} value={watch('subLocationId') || ''}>
+                          <Select
+                            onValueChange={(val: any) => setValue('subLocationId', val)}
+                            value={watch('subLocationId') || ''}
+                            items={[
+                              { value: 'none', label: 'None / Unassigned' },
+                              ...subLocationsList.map(sub => ({ value: sub.id, label: sub.name }))
+                            ]}
+                          >
                             <SelectTrigger>
                               <SelectValue placeholder="Select Department" />
                             </SelectTrigger>
@@ -475,7 +518,14 @@ export default function EditAssetPage({ params }: { params: Promise<{ id: string
                             </Link>
                           </div>
                         ) : (
-                          <Select onValueChange={(val: any) => setValue('warehouseId', val)} value={watch('warehouseId') || ''}>
+                          <Select
+                            onValueChange={(val: any) => setValue('warehouseId', val)}
+                            value={watch('warehouseId') || ''}
+                            items={[
+                              { value: 'none', label: 'None / Unassigned' },
+                              ...warehousesList.map(wh => ({ value: wh.id, label: wh.name }))
+                            ]}
+                          >
                             <SelectTrigger>
                               <SelectValue placeholder="Select Warehouse" />
                             </SelectTrigger>

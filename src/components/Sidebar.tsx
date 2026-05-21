@@ -17,7 +17,8 @@ import {
   Users,
   Palette,
   Bell,
-  Shield
+  Shield,
+  Code2
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
@@ -149,6 +150,7 @@ export function Sidebar({ userRole }: { userRole?: string }) {
     { name: 'View Inventory', href: '/inventory', icon: List },
     { name: 'Faulty / Damaged', href: '/inventory/faulty', icon: List },
     { name: 'Add Asset', href: '/inventory/add', icon: PackagePlus },
+    { name: 'Software Vault', href: '/software-vault', icon: Code2 },
   ];
 
   if (userRole === 'admin') {

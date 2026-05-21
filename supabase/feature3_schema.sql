@@ -48,8 +48,15 @@ CREATE TABLE IF NOT EXISTS inventory_items (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     last_modified_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
 
-    CONSTRAINT unique_serial_per_company UNIQUE NULLS NOT DISTINCT (company_id, serial_number)
+
+    -- Uniqueness of serial numbers per company is enforced via partial index to allow multiple NULL serials (e.g. for Software/Consumables)
 );
+
+-- Drop the old constraint or index if they exist to prevent NULL serial conflicts
+ALTER TABLE inventory_items DROP CONSTRAINT IF EXISTS unique_serial_per_company;
+DROP INDEX IF EXISTS unique_serial_per_company;
+
+CREATE UNIQUE INDEX IF NOT EXISTS unique_serial_per_company ON inventory_items (company_id, serial_number) WHERE serial_number IS NOT NULL;
 
 ALTER TABLE inventory_items ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow all for public on inventory_items" ON inventory_items;

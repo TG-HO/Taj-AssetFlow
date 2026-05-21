@@ -6,7 +6,60 @@ import { Select as SelectPrimitive } from "@base-ui/react/select"
 import { cn } from "@/lib/utils"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
 
-const Select = SelectPrimitive.Root
+const SelectContext = React.createContext<{
+  value?: any
+  items?: ReadonlyArray<{ value: string; label: string }>
+} | null>(null)
+
+function Select<T = any>({
+  value,
+  defaultValue,
+  onValueChange,
+  items,
+  children,
+  ...props
+}: Omit<React.ComponentProps<typeof SelectPrimitive.Root>, 'value' | 'defaultValue' | 'onValueChange'> & {
+  value?: T
+  defaultValue?: T
+  onValueChange?: (value: T, event?: any) => void
+  items?: ReadonlyArray<{ value: string; label: string }>
+}) {
+  const [localValue, setLocalValue] = React.useState(value ?? defaultValue)
+
+  React.useEffect(() => {
+    if (value !== undefined) {
+      setLocalValue(value)
+    }
+  }, [value])
+
+  const handleValueChange = React.useCallback(
+    (...args: any[]) => {
+      const val = args[0]
+      if (value === undefined) {
+        setLocalValue(val)
+      }
+      if (onValueChange) {
+        onValueChange(...(args as [any, any]))
+      }
+    },
+    [value, onValueChange]
+  )
+
+  const activeValue = value !== undefined ? value : localValue
+
+  return (
+    <SelectContext.Provider value={{ value: activeValue, items }}>
+      <SelectPrimitive.Root
+        value={value}
+        defaultValue={defaultValue}
+        onValueChange={handleValueChange}
+        {...props}
+      >
+        {children}
+      </SelectPrimitive.Root>
+    </SelectContext.Provider>
+  )
+}
 
 function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   return (
@@ -18,13 +71,37 @@ function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   )
 }
 
-function SelectValue({ className, ...props }: SelectPrimitive.Value.Props) {
+function SelectValue({
+  className,
+  placeholder,
+  children,
+  ...props
+}: SelectPrimitive.Value.Props & { placeholder?: string }) {
+  const ctx = React.useContext(SelectContext)
+
+  if (ctx?.items && ctx.value !== undefined && ctx.value !== null) {
+    const selectedItem = ctx.items.find(item => item.value === ctx.value)
+    if (selectedItem) {
+      return (
+        <span
+          data-slot="select-value"
+          className={cn("flex flex-1 text-left", className)}
+        >
+          {selectedItem.label}
+        </span>
+      )
+    }
+  }
+
   return (
     <SelectPrimitive.Value
       data-slot="select-value"
       className={cn("flex flex-1 text-left", className)}
+      placeholder={placeholder}
       {...props}
-    />
+    >
+      {children}
+    </SelectPrimitive.Value>
   )
 }
 

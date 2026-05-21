@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -29,7 +30,8 @@ import {
   EyeOff,
   Palette,
   Bell,
-  Check
+  Check,
+  Upload
 } from "lucide-react";
 import { supabase } from '@/lib/supabase';
 import { useTenantSession } from '@/lib/TenantSessionContext';
@@ -85,6 +87,16 @@ const COLOR_THEMES = [
   },
 ];
 
+const LIMIT_OPTIONS = [
+  { value: '50', label: '50 MB' },
+  { value: '100', label: '100 MB' },
+  { value: '250', label: '250 MB' },
+  { value: '500', label: '500 MB' },
+  { value: '1000', label: '1 GB' },
+  { value: '2000', label: '2 GB' },
+  { value: '5000', label: '5 GB' },
+];
+
 function applyTheme(themeId: string) {
   const theme = COLOR_THEMES.find(t => t.id === themeId);
   if (!theme) return;
@@ -101,6 +113,19 @@ function applyTheme(themeId: string) {
 interface DropdownPos { top: number; left: number; openUp: boolean }
 
 export default function SettingsPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex flex-col items-center justify-center py-12 text-muted-foreground min-h-[50vh]">
+        <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
+        <span className="text-sm">Loading settings...</span>
+      </div>
+    }>
+      <SettingsContent />
+    </Suspense>
+  );
+}
+
+function SettingsContent() {
   const { company, profile, isLoading } = useTenantSession();
   const userRole = profile?.role || 'moderator';
 
@@ -118,6 +143,10 @@ export default function SettingsPage() {
   const floatingMenuRef = useRef<HTMLDivElement>(null);
   // Header hover delay timer
   const headerHoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Viewport-aware dropdown state
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   // Sub-view Level
   const [locView, setLocView] = useState<'list' | 'sub-locations' | 'warehouses'>('list');
@@ -178,19 +207,29 @@ export default function SettingsPage() {
   // Appearance
   const [activeTheme, setActiveTheme] = useState('blue');
 
-  // Read URL tab on mount
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const tab = params.get('tab');
-      if (tab) setActiveTab(tab);
+  // Upload limit settings
+  const [uploadLimit, setUploadLimit] = useState('500');
 
-      // Restore saved theme
-      const saved = localStorage.getItem('color_theme') || 'blue';
-      setActiveTheme(saved);
-      applyTheme(saved);
-    }
+  const tabParam = searchParams.get('tab');
+  // Reactively read tab from URL — works on mount AND when URL changes within the page
+  useEffect(() => {
+    if (tabParam) setActiveTab(tabParam);
+  }, [tabParam]);
+
+  // Restore saved theme and settings on mount only
+  useEffect(() => {
+    const saved = localStorage.getItem('color_theme') || 'blue';
+    setActiveTheme(saved);
+    applyTheme(saved);
+
+    const savedLimit = localStorage.getItem('software_upload_limit') || '500';
+    setUploadLimit(savedLimit);
   }, []);
+
+  const handleUploadLimitChange = (val: string) => {
+    setUploadLimit(val);
+    localStorage.setItem('software_upload_limit', val);
+  };
 
   // Close dropdown on outside click — check ref so menu clicks don't self-close
   useEffect(() => {
@@ -199,19 +238,15 @@ export default function SettingsPage() {
       setOpenMenuId(null);
     }
     if (openMenuId) {
-      document.addEventListener('mousedown', handleClick);
-      return () => document.removeEventListener('mousedown', handleClick);
+      document.addEventListener('click', handleClick);
+      return () => document.removeEventListener('click', handleClick);
     }
   }, [openMenuId]);
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
     setIsHeaderHovered(false);
-    if (typeof window !== 'undefined') {
-      const url = new URL(window.location.href);
-      url.searchParams.set('tab', tab);
-      window.history.pushState(null, '', url.pathname + url.search);
-    }
+    router.push(`/settings?tab=${tab}`, { scroll: false });
   };
 
   // ── Locations fetch ──────────────────────────────────────────────
@@ -733,15 +768,50 @@ export default function SettingsPage() {
         {/* TAB: SECURITY                                           */}
         {/* ──────────────────────────────────────────────────────── */}
         {activeTab === 'security' && (
-          <Card className="shadow-sm">
-            <CardHeader>
-              <CardTitle>Security &amp; Sessions</CardTitle>
-              <CardDescription>Review security audits and authentication policies.</CardDescription>
-            </CardHeader>
-            <CardContent className="py-8 text-center text-muted-foreground text-sm">
-              Single sign-on sessions are locked. Contact IT administrator to clear active logins.
-            </CardContent>
-          </Card>
+          <div className="space-y-6">
+            <Card className="shadow-sm border border-muted/50">
+              <CardHeader className="border-b pb-4 bg-muted/5">
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <Upload className="h-5 w-5 text-primary" /> Software Vault Settings
+                </CardTitle>
+                <CardDescription>
+                  Configure security rules and upload limit settings for software installation binaries.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="py-6 space-y-4">
+                <div className="max-w-md space-y-2">
+                  <Label htmlFor="upload-limit">Maximum Software Upload Limit</Label>
+                  <Select value={uploadLimit} onValueChange={handleUploadLimitChange} items={LIMIT_OPTIONS}>
+                    <SelectTrigger id="upload-limit" className="w-full">
+                      <SelectValue placeholder="Select upload limit" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="50">50 MB</SelectItem>
+                      <SelectItem value="100">100 MB</SelectItem>
+                      <SelectItem value="250">250 MB</SelectItem>
+                      <SelectItem value="500">500 MB</SelectItem>
+                      <SelectItem value="1000">1 GB</SelectItem>
+                      <SelectItem value="2000">2 GB</SelectItem>
+                      <SelectItem value="5000">5 GB</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Allows you to set the maximum installer binary file size allowed in the intake wizard and software vault details page.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="shadow-sm border border-muted/50">
+              <CardHeader>
+                <CardTitle>Security &amp; Sessions</CardTitle>
+                <CardDescription>Review security audits and authentication policies.</CardDescription>
+              </CardHeader>
+              <CardContent className="py-8 text-center text-muted-foreground text-sm">
+                Single sign-on sessions are locked. Contact IT administrator to clear active logins.
+              </CardContent>
+            </Card>
+          </div>
         )}
 
         {/* ──────────────────────────────────────────────────────── */}
@@ -773,7 +843,10 @@ export default function SettingsPage() {
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="role">Role Permission</Label>
-                    <Select value={newUserRole} onValueChange={val => { if (val) setNewUserRole(val); }}>
+                    <Select value={newUserRole} onValueChange={val => { if (val) setNewUserRole(val); }} items={[
+                      { value: 'moderator', label: 'Moderator (Read/Write)' },
+                      { value: 'admin', label: 'Admin (Full Access)' }
+                    ]}>
                       <SelectTrigger id="role"><SelectValue placeholder="Select role" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="moderator">Moderator (Read/Write)</SelectItem>

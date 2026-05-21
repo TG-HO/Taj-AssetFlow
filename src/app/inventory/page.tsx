@@ -15,7 +15,8 @@ import { Input } from "@/components/ui/input";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, Plus, FileUp, FileDown, Eye, Edit, Trash2, ArrowUpDown, Check, ChevronDown } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { Search, Plus, FileUp, FileDown, Eye, Edit, Trash2, ArrowUpDown, Check, ChevronDown, ArrowRightLeft, RotateCcw, AlertCircle, Loader2 } from "lucide-react";
 import { deleteAsset } from './actions';
 import { cn } from "@/lib/utils";
 
@@ -32,6 +33,18 @@ export default function InventoryPage() {
   const [durationSort, setDurationSort] = useState('None');
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Custody modals
+  const [checkoutItem, setCheckoutItem] = useState<any | null>(null);
+  const [checkinItem, setCheckinItem] = useState<any | null>(null);
+  const [custodyRecipient, setCustodyRecipient] = useState('');
+  const [custodyCondition, setCustodyCondition] = useState('');
+  const [custodyStatus, setCustodyStatus] = useState<string>('New');
+  const [custodyAction, setCustodyAction] = useState<string>('RETURN');
+  const [isCustodyLoading, setIsCustodyLoading] = useState(false);
+  const [custodyError, setCustodyError] = useState('');
+  const [subLocationsList, setSubLocationsList] = useState<any[]>([]);
+  const [custodyDeptId, setCustodyDeptId] = useState('');
 
   useEffect(() => {
     fetchInventory();
@@ -331,9 +344,10 @@ export default function InventoryPage() {
   const uniqueLocations = Array.from(new Set(inventory.filter(i => !['Faulty', 'Snatched', 'Damaged'].includes(i.status)).map(i => i.location)));
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
+    <>
+      <div className="space-y-6">
+
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <h2 className="text-3xl font-bold tracking-tight text-primary">Inventory</h2>
           <p className="text-muted-foreground mt-1">Manage all IT assets in the Taj Gasoline organization.</p>
         </div>
@@ -358,7 +372,7 @@ export default function InventoryPage() {
             Add Asset
           </Link>
         </div>
-      </div>
+
 
       <div className="flex items-center space-x-2">
         <div className="relative flex-1 max-w-md">
@@ -546,6 +560,27 @@ export default function InventoryPage() {
                       <Edit className="h-4 w-4" />
                       <span className="sr-only">Edit</span>
                     </Link>
+                    {/* Checkout button */}
+                    <button
+                      type="button"
+                      title={['Faulty','Damaged','Snatched'].includes(item.status) ? `Cannot issue — status is ${item.status}` : 'Issue / Checkout'}
+                      disabled={['Faulty','Damaged','Snatched'].includes(item.status)}
+                      onClick={() => { setCheckoutItem(item); setCustodyRecipient(''); setCustodyCondition(''); setCustodyDeptId(''); setCustodyError(''); }}
+                      className={cn('p-1.5 rounded-md transition-colors', ['Faulty','Damaged','Snatched'].includes(item.status) ? 'opacity-30 cursor-not-allowed' : 'text-blue-600 hover:bg-blue-50')}
+                    >
+                      <ArrowRightLeft className="h-3.5 w-3.5" />
+                    </button>
+                    {/* Check-In button */}
+                    {item.status === 'Used' && (
+                      <button
+                        type="button"
+                        title="Return / Check-In"
+                        onClick={() => { setCheckinItem(item); setCustodyRecipient(''); setCustodyCondition(''); setCustodyStatus('New'); setCustodyAction('RETURN'); setCustodyError(''); }}
+                        className="p-1.5 rounded-md text-green-600 hover:bg-green-50 transition-colors"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                     {userRole === 'admin' && (
                       <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleDelete(item.id)}>
                         <Trash2 className="h-4 w-4" />
@@ -559,7 +594,94 @@ export default function InventoryPage() {
           </TableBody>
         </Table>
       </div>
-    </div>
+      </div>
+
+
+    {/* ── Checkout (Issuance) Modal ──────────────────────────────── */}
+    {checkoutItem && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div className="bg-background border border-muted/50 rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4 animate-in zoom-in-95 duration-200">
+          <div>
+            <h3 className="text-lg font-bold flex items-center gap-2"><ArrowRightLeft className="h-5 w-5 text-primary" />Issue Item</h3>
+            <p className="text-sm text-muted-foreground mt-0.5">Checking out <strong>{checkoutItem.laptopName}</strong> ({checkoutItem.serialNumber})</p>
+          </div>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="co-recipient">Recipient Name <span className="text-destructive">*</span></Label>
+              <Input id="co-recipient" placeholder="Full name of recipient" value={custodyRecipient} onChange={e => setCustodyRecipient(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="co-condition">Condition at Handover <span className="text-destructive">*</span></Label>
+              <textarea id="co-condition" className="flex min-h-[72px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" placeholder="e.g. Mint condition with original power brick and laptop bag" value={custodyCondition} onChange={e => setCustodyCondition(e.target.value)} />
+            </div>
+          </div>
+          {custodyError && <div className="flex items-center gap-2 text-xs text-destructive bg-destructive/10 border border-destructive/20 px-3 py-2 rounded-lg"><AlertCircle size={13} />{custodyError}</div>}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="outline" onClick={() => setCheckoutItem(null)} disabled={isCustodyLoading}>Cancel</Button>
+            <Button disabled={isCustodyLoading} onClick={async () => {
+              if (!custodyRecipient.trim() || !custodyCondition.trim()) { setCustodyError('All fields are required.'); return; }
+              setIsCustodyLoading(true); setCustodyError('');
+              const { issueItem } = await import('@/app/custody/actions');
+              const r = await issueItem(checkoutItem.id, custodyRecipient, custodyCondition, custodyDeptId || undefined);
+              setIsCustodyLoading(false);
+              if (r.success) { setCheckoutItem(null); fetchInventory(); }
+              else setCustodyError(r.error || 'Failed.');
+            }}>
+              {isCustodyLoading ? <><Loader2 size={14} className="animate-spin mr-2" />Issuing...</> : <><ArrowRightLeft size={14} className="mr-2" />Issue Item</>}
+            </Button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ── Check-In (Return) Modal ────────────────────────────────── */}
+    {checkinItem && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div className="bg-background border border-muted/50 rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4 animate-in zoom-in-95 duration-200">
+          <div>
+            <h3 className="text-lg font-bold flex items-center gap-2"><RotateCcw className="h-5 w-5 text-green-600" />Return / Check-In</h3>
+            <p className="text-sm text-muted-foreground mt-0.5">Checking in <strong>{checkinItem.laptopName}</strong> ({checkinItem.serialNumber})</p>
+          </div>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="ci-recipient">Returned By <span className="text-destructive">*</span></Label>
+              <Input id="ci-recipient" placeholder="Name of person returning" value={custodyRecipient} onChange={e => setCustodyRecipient(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ci-condition">Physical Condition <span className="text-destructive">*</span></Label>
+              <textarea id="ci-condition" className="flex min-h-[72px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" placeholder="e.g. Minor scratches on lid, charger missing" value={custodyCondition} onChange={e => setCustodyCondition(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>New Status After Return</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {[{v:'New',l:'Available'},{v:'Used',l:'Used'},{v:'Faulty',l:'Faulty'},{v:'Damaged',l:'Damaged'},{v:'Snatched',l:'Snatched'}].map(opt => (
+                  <button key={opt.v} type="button" onClick={() => {
+                    setCustodyStatus(opt.v);
+                    setCustodyAction(opt.v === 'Faulty' ? 'FAULT_DEPOSIT' : opt.v === 'Snatched' ? 'SNATCH_REPORT' : 'RETURN');
+                  }} className={cn('text-xs px-3 py-2 rounded-lg border transition-all font-medium', custodyStatus === opt.v ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted border-muted')}>{opt.l}</button>
+                ))}
+              </div>
+            </div>
+          </div>
+          {custodyError && <div className="flex items-center gap-2 text-xs text-destructive bg-destructive/10 border border-destructive/20 px-3 py-2 rounded-lg"><AlertCircle size={13} />{custodyError}</div>}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="outline" onClick={() => setCheckinItem(null)} disabled={isCustodyLoading}>Cancel</Button>
+            <Button disabled={isCustodyLoading} onClick={async () => {
+              if (!custodyRecipient.trim() || !custodyCondition.trim()) { setCustodyError('All fields are required.'); return; }
+              setIsCustodyLoading(true); setCustodyError('');
+              const { returnItem } = await import('@/app/custody/actions');
+              const r = await returnItem(checkinItem.id, custodyRecipient, custodyCondition, custodyStatus as any, custodyAction as any);
+              setIsCustodyLoading(false);
+              if (r.success) { setCheckinItem(null); fetchInventory(); }
+              else setCustodyError(r.error || 'Failed.');
+            }}>
+              {isCustodyLoading ? <><Loader2 size={14} className="animate-spin mr-2" />Saving...</> : <><RotateCcw size={14} className="mr-2" />Confirm Return</>}
+            </Button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
