@@ -6,7 +6,7 @@
 CREATE TABLE IF NOT EXISTS audit_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES auth.users(id),
+    user_id VARCHAR(150) NOT NULL,           -- custom session user ID (not auth.users)
     user_email VARCHAR(255) NOT NULL,
     action_type VARCHAR(100) NOT NULL,       -- E.g. 'ADD_ASSET', 'DELETE_LOCATION'
     target_identifier VARCHAR(150) NULL,     -- E.g. serial number or item name

@@ -30,6 +30,7 @@ import { supabase } from '@/lib/supabase';
 import { getCategories, checkNewSerialNumber, addInventoryItem } from '../item-actions';
 import { registerSoftwareInstaller } from '../../software-vault/actions';
 import { useTenantSession } from '@/lib/TenantSessionContext';
+import { toast } from '@/components/ui/toast';
 
 type Classification = 'Asset' | 'Consumable' | 'Software';
 interface Category { id: string; name: string; classification: Classification; }
@@ -106,7 +107,7 @@ export default function AddAssetPage() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
+
   // Dynamic upload limit from localStorage
   const [maxBytes, setMaxBytes] = useState(500 * 1024 * 1024);
   const [uploadLimitLabel, setUploadLimitLabel] = useState('500MB');
@@ -116,7 +117,7 @@ export default function AddAssetPage() {
   const [isUploading, setIsUploading] = useState(false);
 
   useEffect(() => {
-    const savedLimit = localStorage.getItem('software_upload_limit') || '500';
+    const savedLimit = localStorage.getItem('software_upload_limit') || '50';
     const limitMb = parseInt(savedLimit, 10) || 500;
     setMaxBytes(limitMb * 1024 * 1024);
     setUploadLimitLabel(limitMb >= 1000 ? `${(limitMb / 1000).toFixed(0)}GB` : `${limitMb}MB`);
@@ -129,6 +130,21 @@ export default function AddAssetPage() {
   };
 
   const ALLOWED_TYPES = ['.exe', '.msi', '.zip', '.dmg', '.pkg', '.tar.gz'];
+
+  /** Translate cryptic Supabase storage errors into user-friendly messages */
+  const translateStorageError = (raw: string): string => {
+    const s = raw.toLowerCase();
+    if (s.includes('exceeded') && s.includes('size')) {
+      return 'Upload failed: file too large for storage. In Supabase Dashboard → Storage → Settings, increase the "Upload file size limit". Also ensure fix_upload_and_auth.sql has been run in the SQL Editor.';
+    }
+    if (s.includes('bucket not found') || s.includes('not found')) {
+      return 'Storage bucket does not exist. Run fix_upload_and_auth.sql in the Supabase Dashboard SQL Editor first, then retry.';
+    }
+    if (s.includes('row-level security') || s.includes('rls') || s.includes('policy')) {
+      return 'Storage permission denied. Ensure fix_upload_and_auth.sql RLS policies are applied in the Supabase SQL Editor.';
+    }
+    return raw;
+  };
 
   const validateFile = (file: File): string | null => {
     if (file.size > maxBytes) return `File exceeds ${uploadLimitLabel} limit.`;
@@ -242,7 +258,7 @@ export default function AddAssetPage() {
       }
       if (selectedClassification === 'Software') {
         if (totalSeats < 1) { setGlobalError('Total seats must be at least 1.'); return false; }
-        if (uploadFile && !softwareVersion.trim()) { setGlobalError('Version is required when uploading an installer file.'); return false; }
+        if (!softwareVersion.trim()) { setGlobalError('Version is required for Software items.'); return false; }
       }
       return true;
     }
@@ -308,7 +324,8 @@ export default function AddAssetPage() {
       try {
         const bucket = 'software-binaries';
         const activeCompanyId = companyId || 'default';
-        const filePath = `${activeCompanyId}/${itemId}/${Date.now()}_${uploadFile.name}`;
+        const timestamp = Date.now();
+        const filePath = `${activeCompanyId}/${itemId}/${timestamp}_${uploadFile.name}`;
 
         const uploadPromise = new Promise<void>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
@@ -318,7 +335,7 @@ export default function AddAssetPage() {
 
           supabase.auth.getSession().then(({ data: { session } }) => {
             const token = session?.access_token || supabaseAnonKey;
-            
+
             xhr.open('POST', uploadUrl, true);
             xhr.setRequestHeader('apikey', supabaseAnonKey);
             xhr.setRequestHeader('Authorization', `Bearer ${token}`);
@@ -337,9 +354,9 @@ export default function AddAssetPage() {
                 let errorMsg = 'Storage upload failed.';
                 try {
                   const res = JSON.parse(xhr.responseText);
-                  errorMsg = res.message || errorMsg;
-                } catch (e) {}
-                reject(new Error(errorMsg));
+                  errorMsg = res.error || res.message || errorMsg;
+                } catch (e) { }
+                reject(new Error(translateStorageError(errorMsg)));
               }
             };
 
@@ -368,17 +385,29 @@ export default function AddAssetPage() {
           throw new Error(registerResult.error || 'Failed to register installer in database.');
         }
       } catch (uploadErr: any) {
-        setGlobalError(`Item created successfully, but installer upload failed: ${uploadErr.message}. You can retry uploading the installer from the software vault page.`);
+        setGlobalError(`Item created successfully, but installer upload failed: ${uploadErr.message}. You can retry uploading from the Software Vault.`);
         setIsUploading(false);
         setIsSubmitting(false);
         setTimeout(() => setUploadProgress(0), 1000);
+        // Still redirect to software vault so user can retry upload there
+        setTimeout(() => {
+          toast('Software item saved! Installer upload failed — retry from the vault.', 'error');
+          router.push(`/software-vault/${itemId}`);
+        }, 2500);
         return;
       }
       setIsUploading(false);
     }
 
     setIsSubmitting(false);
-    router.push('/inventory');
+    // Redirect based on classification
+    if (selectedClassification === 'Software' && itemId) {
+      toast('Software item registered successfully! 🎉', 'success');
+      router.push(`/software-vault/${itemId}`);
+    } else {
+      toast('Item added to inventory successfully!', 'success');
+      router.push('/inventory');
+    }
   };
 
   const groupedCategories = categories.reduce<Record<string, Category[]>>((acc, cat) => {
@@ -418,11 +447,10 @@ export default function AddAssetPage() {
       <div className="relative flex justify-between items-start pt-2">
         {STEPS.map((s, idx) => (
           <div key={s.id} className="flex flex-col items-center relative z-10 flex-1">
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all duration-300 ${
-              step > idx ? 'bg-primary text-primary-foreground shadow-md'
-              : step === idx ? 'bg-primary text-primary-foreground ring-4 ring-primary/20'
-              : 'bg-muted text-muted-foreground'
-            }`}>
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all duration-300 ${step > idx ? 'bg-primary text-primary-foreground shadow-md'
+                : step === idx ? 'bg-primary text-primary-foreground ring-4 ring-primary/20'
+                  : 'bg-muted text-muted-foreground'
+              }`}>
               {step > idx ? <Check size={16} /> : idx + 1}
             </div>
             <span className="text-[11px] font-medium mt-2 text-center leading-tight text-muted-foreground w-20">{s.title}</span>
@@ -649,7 +677,7 @@ export default function AddAssetPage() {
                       <Input id="license-key" placeholder="e.g. XXXXX-XXXXX-XXXXX" value={licenseKey} onChange={e => setLicenseKey(e.target.value)} />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="sw-version">Version <span className="text-muted-foreground font-normal">({uploadFile ? 'Required' : 'Optional'})</span></Label>
+                      <Label htmlFor="sw-version">Version <span className="text-destructive">*</span></Label>
                       <Input id="sw-version" placeholder="e.g. 2024 / v11.0" value={softwareVersion} onChange={e => setSoftwareVersion(e.target.value)} />
                     </div>
                   </div>
@@ -679,9 +707,8 @@ export default function AddAssetPage() {
                       onDragLeave={() => setIsDragging(false)}
                       onDrop={handleFileDrop}
                       onClick={() => fileInputRef.current?.click()}
-                      className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all duration-200 ${
-                        isDragging ? 'border-primary bg-primary/5 scale-[1.01]' : uploadFile ? 'border-green-400 bg-green-50' : 'border-muted hover:border-primary/50 hover:bg-muted/30'
-                      }`}
+                      className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all duration-200 ${isDragging ? 'border-primary bg-primary/5 scale-[1.01]' : uploadFile ? 'border-green-400 bg-green-50' : 'border-muted hover:border-primary/50 hover:bg-muted/30'
+                        }`}
                     >
                       <input ref={fileInputRef} type="file" className="hidden" accept=".exe,.msi,.zip,.dmg,.pkg,.gz" onChange={handleFileSelect} />
                       {uploadFile ? (

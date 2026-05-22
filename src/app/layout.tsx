@@ -4,6 +4,7 @@ import "./globals.css";
 import { Sidebar } from "@/components/Sidebar";
 import { getSession } from "@/lib/auth";
 import { TenantSessionProvider } from "@/lib/TenantSessionContext";
+import { ToastProvider } from "@/components/ui/toast";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -21,7 +22,7 @@ export default async function RootLayout({
   const isLoginPage = !session;
 
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: `
           (function() {
@@ -54,6 +55,7 @@ export default async function RootLayout({
       </head>
       <body className={`${inter.className} antialiased bg-background text-foreground flex`}>
         <TenantSessionProvider>
+          <ToastProvider />
           {!isLoginPage && <Sidebar userRole={session?.role} />}
           <main className={`flex-1 min-h-screen bg-muted/20 ${!isLoginPage ? 'ml-64 max-w-[calc(100vw-16rem)]' : 'w-full max-w-[100vw]'} overflow-x-hidden`}>
             <div className="p-4 sm:p-8 w-full max-w-7xl mx-auto">

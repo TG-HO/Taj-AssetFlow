@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS software_installers (
     file_size_bytes BIGINT NOT NULL,
     version VARCHAR(50) NOT NULL,
     download_count INT DEFAULT 0 NOT NULL,
-    uploaded_by UUID NOT NULL REFERENCES auth.users(id),
+    uploaded_by VARCHAR(150) NOT NULL,  -- custom session user ID (not auth.users)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 

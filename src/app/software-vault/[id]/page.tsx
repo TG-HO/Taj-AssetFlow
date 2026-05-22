@@ -11,11 +11,12 @@ import { Badge } from '@/components/ui/badge';
 import {
   ArrowLeft, Code2, Key, Users, Calendar, Upload, Download,
   Trash2, ShieldAlert, AlertCircle, Check, Loader2,
-  FileArchive, ExternalLink, UserPlus, X, Info
+  FileArchive, ExternalLink, UserPlus, X, Info, AlertTriangle
 } from 'lucide-react';
-import { getSoftwarePassport, uploadInstaller, generateDownloadUrl, assignSeat, revokeSeat, deleteInstaller, registerSoftwareInstaller } from '../actions';
+import { getSoftwarePassport, uploadInstaller, generateDownloadUrl, assignSeat, revokeSeat, deleteInstaller, registerSoftwareInstaller, deleteSoftwarePassport } from '../actions';
 import { supabase } from '@/lib/supabase';
 import { useTenantSession } from '@/lib/TenantSessionContext';
+import { toast } from '@/components/ui/toast';
 
 function getSpec(specs: any[], key: string) { return specs?.find((s: any) => s.spec_key === key)?.spec_value || null; }
 function fmtSize(bytes: number) {
@@ -29,6 +30,24 @@ function daysLeft(dateStr: string | null): number | null {
 }
 
 const ALLOWED_TYPES = ['.exe', '.msi', '.zip', '.dmg', '.pkg', '.tar.gz'];
+
+/** Translate cryptic Supabase storage errors into user-friendly messages */
+function translateStorageError(raw: string): string {
+  const s = raw.toLowerCase();
+  if (s.includes('exceeded') && s.includes('size')) {
+    return 'File is too large for the storage bucket. Go to Supabase Dashboard → Storage → Settings and increase the "Upload file size limit". The bucket may also not exist yet — run the fix_upload_and_auth.sql script in the Supabase SQL Editor.';
+  }
+  if (s.includes('bucket not found') || s.includes('not found')) {
+    return 'Storage bucket does not exist. Run the fix_upload_and_auth.sql script in the Supabase Dashboard SQL Editor first.';
+  }
+  if (s.includes('row-level security') || s.includes('rls') || s.includes('policy')) {
+    return 'Storage permission denied. Ensure RLS policies are applied via fix_upload_and_auth.sql in the Supabase SQL Editor.';
+  }
+  if (s.includes('unauthorized') || s.includes('invalid token')) {
+    return 'Authorization failed. Try refreshing the page and uploading again.';
+  }
+  return raw;
+}
 
 export default function SoftwarePassportPage() {
   const params = useParams();
@@ -54,7 +73,7 @@ export default function SoftwarePassportPage() {
   const [uploadLimitLabel, setUploadLimitLabel] = useState('500MB');
 
   useEffect(() => {
-    const savedLimit = localStorage.getItem('software_upload_limit') || '500';
+    const savedLimit = localStorage.getItem('software_upload_limit') || '50';
     const limitMb = parseInt(savedLimit, 10) || 500;
     setMaxBytes(limitMb * 1024 * 1024);
     setUploadLimitLabel(limitMb >= 1000 ? `${(limitMb / 1000).toFixed(0)}GB` : `${limitMb}MB`);
@@ -68,6 +87,10 @@ export default function SoftwarePassportPage() {
 
   // Download state
   const [loadingDownloadId, setLoadingDownloadId] = useState<string | null>(null);
+
+  // Delete passport state
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isDeletingPassport, setIsDeletingPassport] = useState(false);
 
   const loadPassport = useCallback(async () => {
     setIsLoading(true);
@@ -120,7 +143,7 @@ export default function SoftwarePassportPage() {
 
         supabase.auth.getSession().then(({ data: { session } }) => {
           const token = session?.access_token || supabaseAnonKey;
-          
+
           xhr.open('POST', uploadUrl, true);
           xhr.setRequestHeader('apikey', supabaseAnonKey);
           xhr.setRequestHeader('Authorization', `Bearer ${token}`);
@@ -139,9 +162,9 @@ export default function SoftwarePassportPage() {
               let errorMsg = 'Storage upload failed.';
               try {
                 const res = JSON.parse(xhr.responseText);
-                errorMsg = res.message || errorMsg;
-              } catch (e) {}
-              reject(new Error(errorMsg));
+                errorMsg = res.error || res.message || errorMsg;
+              } catch (e) { }
+              reject(new Error(translateStorageError(errorMsg)));
             }
           };
 
@@ -217,6 +240,19 @@ export default function SoftwarePassportPage() {
     await loadPassport();
   };
 
+  const handleDeletePassport = async () => {
+    setIsDeletingPassport(true);
+    const result = await deleteSoftwarePassport(itemId);
+    setIsDeletingPassport(false);
+    if (result.success) {
+      toast('Software passport deleted successfully.', 'success');
+      router.push('/software-vault');
+    } else {
+      toast(result.error || 'Failed to delete passport.', 'error');
+      setShowDeleteModal(false);
+    }
+  };
+
   if (isLoading) return (
     <div className="flex flex-col items-center justify-center py-24">
       <Loader2 className="h-10 w-10 animate-spin text-primary mb-3" />
@@ -260,6 +296,13 @@ export default function SoftwarePassportPage() {
           </div>
           <p className="text-muted-foreground text-sm">{item.item_categories?.name} · {item.status_state}</p>
         </div>
+        <Button
+          variant="outline"
+          className="gap-2 text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive shrink-0 mt-1"
+          onClick={() => setShowDeleteModal(true)}
+        >
+          <Trash2 size={14} /> Delete Passport
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -368,9 +411,8 @@ export default function SoftwarePassportPage() {
                 onDragLeave={() => setIsDragging(false)}
                 onDrop={handleFileDrop}
                 onClick={() => fileInputRef.current?.click()}
-                className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all duration-200 ${
-                  isDragging ? 'border-primary bg-primary/5 scale-[1.01]' : uploadFile ? 'border-green-400 bg-green-50' : 'border-muted hover:border-primary/50 hover:bg-muted/30'
-                }`}
+                className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all duration-200 ${isDragging ? 'border-primary bg-primary/5 scale-[1.01]' : uploadFile ? 'border-green-400 bg-green-50' : 'border-muted hover:border-primary/50 hover:bg-muted/30'
+                  }`}
               >
                 <input ref={fileInputRef} type="file" className="hidden" accept=".exe,.msi,.zip,.dmg,.pkg,.gz" onChange={handleFileSelect} />
                 {uploadFile ? (
@@ -490,6 +532,42 @@ export default function SoftwarePassportPage() {
             </p>
             <div className="flex justify-end">
               <Button variant="outline" className="border-destructive/30" onClick={() => setOversubscribedModal(false)}>Close</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Passport Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-background border border-destructive/30 p-6 rounded-xl shadow-xl w-full max-w-md space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-destructive/10">
+                <AlertTriangle className="h-5 w-5 text-destructive" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold">Delete Software Passport</h3>
+                <p className="text-sm text-muted-foreground">This action cannot be undone.</p>
+              </div>
+            </div>
+            <div className="bg-destructive/5 border border-destructive/20 rounded-lg px-4 py-3 text-sm text-destructive space-y-1">
+              <p className="font-semibold">This will permanently delete:</p>
+              <ul className="list-disc list-inside text-xs space-y-0.5 text-destructive/80">
+                <li>The software item <strong>{item.name}</strong></li>
+                <li>All {installers.length} uploaded installer file{installers.length !== 1 ? 's' : ''} from storage</li>
+                <li>All {allocations.length} seat allocation{allocations.length !== 1 ? 's' : ''}</li>
+                <li>All license metadata and specs</li>
+              </ul>
+            </div>
+            <div className="flex gap-3 justify-end pt-1">
+              <Button variant="outline" onClick={() => setShowDeleteModal(false)} disabled={isDeletingPassport}>Cancel</Button>
+              <Button
+                className="bg-destructive text-white hover:bg-destructive/90 gap-2"
+                onClick={handleDeletePassport}
+                disabled={isDeletingPassport}
+              >
+                {isDeletingPassport ? <><Loader2 size={14} className="animate-spin" />Deleting...</> : <><Trash2 size={14} />Delete Permanently</>}
+              </Button>
             </div>
           </div>
         </div>

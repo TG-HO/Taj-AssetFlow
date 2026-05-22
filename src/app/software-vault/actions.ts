@@ -224,3 +224,40 @@ export async function deleteInstaller(installerId: string, filePath: string, ite
   revalidatePath(`/software-vault/${itemId}`);
   return { success: true };
 }
+
+// ─── Delete entire software passport ─────────────────────────────
+export async function deleteSoftwarePassport(itemId: string) {
+  const session = await getSession();
+  if (!session) return { success: false, error: 'Unauthorized' };
+
+  // 1. Get all installer file paths so we can remove from storage
+  const { data: installers } = await supabase
+    .from('software_installers')
+    .select('id, file_path, file_name')
+    .eq('inventory_item_id', itemId);
+
+  // 2. Remove all installer files from storage
+  if (installers && installers.length > 0) {
+    const filePaths = installers.map((i: any) => i.file_path);
+    await supabase.storage.from(BUCKET).remove(filePaths);
+  }
+
+  // 3. Delete all seat allocations (FK cascade should handle this, but be explicit)
+  await supabase.from('software_allocations').delete().eq('software_item_id', itemId);
+
+  // 4. Delete installer records
+  await supabase.from('software_installers').delete().eq('inventory_item_id', itemId);
+
+  // 5. Delete specs
+  await supabase.from('inventory_specs').delete().eq('item_id', itemId);
+
+  // 6. Delete the inventory item itself
+  const { error } = await supabase.from('inventory_items').delete().eq('id', itemId);
+  if (error) return { success: false, error: error.message };
+
+  const itemName = installers?.[0]?.file_name || itemId;
+  await writeAuditLog('DELETE_ASSET', itemName, { item_id: itemId }, null);
+  revalidatePath('/software-vault');
+  return { success: true };
+}
+
