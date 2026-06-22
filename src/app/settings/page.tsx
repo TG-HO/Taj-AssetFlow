@@ -292,7 +292,8 @@ function SettingsContent() {
   useEffect(() => {
     if (activeTab === 'locations') fetchLocationsData();
     else if (activeTab === 'users' && userRole === 'admin') fetchUsersData();
-  }, [activeTab]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, userRole]);
 
   // ── Viewport-aware menu trigger ──────────────────────────────────
   const handleMenuOpen = (e: React.MouseEvent<HTMLButtonElement>, locId: string) => {

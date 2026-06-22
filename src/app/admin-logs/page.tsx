@@ -31,6 +31,12 @@ const ACTION_COLORS: Record<string, string> = {
   REVOKE_SEAT: 'bg-orange-100 text-orange-700',
   UPLOAD_INSTALLER: 'bg-primary/10 text-primary',
   DELETE_INSTALLER: 'bg-destructive/10 text-destructive',
+  ADD_CONSUMABLE: 'bg-green-100 text-green-700',
+  EDIT_CONSUMABLE: 'bg-blue-100 text-blue-700',
+  DELETE_CONSUMABLE: 'bg-destructive/10 text-destructive',
+  ADD_SOFTWARE: 'bg-green-100 text-green-700',
+  EDIT_SOFTWARE: 'bg-blue-100 text-blue-700',
+  DELETE_SOFTWARE: 'bg-destructive/10 text-destructive',
 };
 
 const ALL_ACTION_TYPES = Object.keys(ACTION_COLORS);

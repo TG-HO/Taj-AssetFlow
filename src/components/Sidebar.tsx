@@ -18,7 +18,8 @@ import {
   Palette,
   Bell,
   Shield,
-  Code2
+  Code2,
+  Package
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
@@ -148,6 +149,7 @@ export function Sidebar({ userRole }: { userRole?: string }) {
   const links = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
     { name: 'View Inventory', href: '/inventory', icon: List },
+    { name: 'Consumables', href: '/inventory/consumables', icon: Package },
     { name: 'Faulty / Damaged', href: '/inventory/faulty', icon: List },
     { name: 'Add Asset', href: '/inventory/add', icon: PackagePlus },
     { name: 'Software Vault', href: '/software-vault', icon: Code2 },

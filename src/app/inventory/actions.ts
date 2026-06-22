@@ -9,7 +9,7 @@ export async function getCurrentUserRole() {
   return session?.role || 'moderator';
 }
 
-async function logAdminAction(action: string, targetSerialNumber: string | null, details: any, changes?: any) {
+export async function logAdminAction(action: string, targetSerialNumber: string | null, details: any, changes?: any) {
   const session = await getSession();
   const username = session?.username || 'System';
   

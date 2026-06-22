@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { supabase } from '@/lib/supabase';
 import { getCategories, checkNewSerialNumber, addInventoryItem } from '../item-actions';
+import { addAsset } from '../actions';
 import { registerSoftwareInstaller } from '../../software-vault/actions';
 import { useTenantSession } from '@/lib/TenantSessionContext';
 import { toast } from '@/components/ui/toast';
@@ -291,6 +292,28 @@ export default function AddAssetPage() {
       if (expiryDate) specs.push({ key: 'Expiry_Date', value: expiryDate });
       specs.push({ key: 'Total_Seats', value: String(totalSeats) });
     }
+    if (selectedClassification === 'Asset') {
+      const assetResult = await addAsset({
+        laptopName: itemName.trim(),
+        serialNumber: serialNumber.trim(),
+        ram: ram || 'Unknown',
+        storageType: storageType || 'SSD',
+        storageCapacity: storageCapacity || 'Unknown',
+        assignedTo: assignedTo || null,
+        locationId: locationId,
+        subLocationId: (subLocationId && subLocationId !== 'none') ? subLocationId : null,
+        warehouseId: (warehouseId && warehouseId !== 'none') ? warehouseId : null,
+        status: statusState,
+        details: notes || null,
+      });
+
+      if (!assetResult.success) {
+        setGlobalError(assetResult.error || 'Failed to save asset.');
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
     const result = await addInventoryItem({
       category_id: selectedCategoryId,
       classification: selectedClassification!,

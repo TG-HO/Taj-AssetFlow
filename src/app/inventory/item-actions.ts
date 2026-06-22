@@ -149,6 +149,141 @@ export async function addInventoryItem(payload: AddInventoryItemPayload) {
     }
   }
 
+  // Log action
+  try {
+    if (payload.classification !== 'Asset') {
+      const { logAdminAction } = await import('./actions');
+      const logAction = payload.classification === 'Consumable' ? 'ADD_CONSUMABLE' 
+                      : payload.classification === 'Software' ? 'ADD_SOFTWARE' 
+                      : 'ADD_INVENTORY_ITEM';
+      await logAdminAction(logAction, payload.serial_number || null, {
+        id: item.id,
+        name: payload.name,
+        classification: payload.classification,
+        quantity: qty,
+        location_id: payload.location_id,
+      });
+    }
+  } catch (e) {
+    console.error("Failed to log admin action:", e);
+  }
+
   revalidatePath('/inventory');
   return { success: true, itemId: item.id };
+}
+
+export async function updateInventoryItem(payload: {
+  id: string;
+  name: string;
+  category_id: string;
+  location_id: string;
+  sub_location_id?: string | null;
+  warehouse_id?: string | null;
+  status_state: string;
+  quantity: number;
+  minimum_safety_stock: number;
+  notes?: string | null;
+}) {
+  const session = await getSession();
+  if (!session) return { success: false, error: 'Unauthorized' };
+
+  if (payload.quantity < 0) return { success: false, error: 'Quantity cannot be negative.' };
+  if (payload.minimum_safety_stock < 0) return { success: false, error: 'Minimum safety stock cannot be negative.' };
+
+  // Fetch old item for logging diff
+  const { data: oldItem } = await supabase
+    .from('inventory_items')
+    .select('*')
+    .eq('id', payload.id)
+    .single();
+
+  const { error } = await supabase
+    .from('inventory_items')
+    .update({
+      category_id: payload.category_id,
+      location_id: payload.location_id,
+      sub_location_id: payload.sub_location_id || null,
+      warehouse_id: payload.warehouse_id || null,
+      name: payload.name.trim(),
+      status_state: payload.status_state,
+      quantity: payload.quantity,
+      minimum_safety_stock: payload.minimum_safety_stock,
+      notes: payload.notes?.trim() || null,
+    })
+    .eq('id', payload.id);
+
+  if (error) return { success: false, error: error.message };
+
+  // Log action
+  try {
+    let classification = 'Consumable';
+    if (oldItem?.category_id) {
+      const { data: cat } = await supabase.from('item_categories').select('classification').eq('id', oldItem.category_id).single();
+      if (cat?.classification) classification = cat.classification;
+    }
+    const logAction = classification === 'Software' ? 'EDIT_SOFTWARE' : 'EDIT_CONSUMABLE';
+
+    const { logAdminAction } = await import('./actions');
+    const changes = {
+      before: oldItem ? {
+        name: oldItem.name,
+        quantity: oldItem.quantity,
+        minimum_safety_stock: oldItem.minimum_safety_stock,
+        status_state: oldItem.status_state,
+        notes: oldItem.notes
+      } : null,
+      after: {
+        name: payload.name,
+        quantity: payload.quantity,
+        minimum_safety_stock: payload.minimum_safety_stock,
+        status_state: payload.status_state,
+        notes: payload.notes
+      }
+    };
+    await logAdminAction(logAction, oldItem?.serial_number || null, payload, changes);
+  } catch (e) {
+    console.error("Failed to log admin action:", e);
+  }
+
+  revalidatePath('/inventory/consumables');
+  return { success: true };
+}
+
+export async function deleteInventoryItem(id: string) {
+  const session = await getSession();
+  if (session?.role !== 'admin') {
+    return { success: false, error: 'Unauthorized: Only Admins can delete items.' };
+  }
+
+  // Fetch item for logging
+  const { data: item } = await supabase
+    .from('inventory_items')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  const { error } = await supabase
+    .from('inventory_items')
+    .delete()
+    .eq('id', id);
+
+  if (error) return { success: false, error: error.message };
+
+  // Log action
+  try {
+    let classification = 'Consumable';
+    if (item?.category_id) {
+      const { data: cat } = await supabase.from('item_categories').select('classification').eq('id', item.category_id).single();
+      if (cat?.classification) classification = cat.classification;
+    }
+    const logAction = classification === 'Software' ? 'DELETE_SOFTWARE' : 'DELETE_CONSUMABLE';
+
+    const { logAdminAction } = await import('./actions');
+    await logAdminAction(logAction, item?.serial_number || null, item);
+  } catch (e) {
+    console.error("Failed to log admin action:", e);
+  }
+
+  revalidatePath('/inventory/consumables');
+  return { success: true };
 }
