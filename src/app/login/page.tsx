@@ -81,7 +81,7 @@ export default function LoginPage() {
       // 2. Fetch profile from the database
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select('id, email, company_id, role, full_name')
+        .select('id, email, company_id, role, full_name, assigned_location_id, assigned_location_ids')
         .eq('id', authData.user.id)
         .single();
 
@@ -111,9 +111,12 @@ export default function LoginPage() {
 
       const sessionResult = await createSession({
         id: profile.id,
-        username: profile.full_name || profile.email,
+        username: profile.email,
         role: profile.role,
-        company_id: profile.company_id
+        company_id: profile.company_id,
+        assigned_location_id: profile.assigned_location_id || null,
+        assigned_location_ids: profile.assigned_location_ids || [],
+        full_name: profile.full_name || null
       });
 
       if (sessionResult.success) {

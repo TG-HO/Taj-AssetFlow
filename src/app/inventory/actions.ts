@@ -3,6 +3,7 @@
 import { supabase } from '@/lib/supabase'
 import { revalidatePath } from 'next/cache'
 import { getSession } from '@/lib/auth'
+import { writeAuditLog } from '@/lib/audit'
 
 export async function getCurrentUserRole() {
   const session = await getSession();
@@ -63,6 +64,7 @@ export async function addAsset(data: any) {
   }
 
   await logAdminAction('ADD_ASSET', data.serialNumber, data);
+  await writeAuditLog('ADD_ASSET', data.serialNumber, null, data);
 
   revalidatePath('/inventory')
   return { success: true }
@@ -147,6 +149,7 @@ export async function updateAsset(id: string, data: any) {
   }
 
   await logAdminAction('UPDATE_ASSET', data.serialNumber, data, changes);
+  await writeAuditLog('EDIT_ASSET', data.serialNumber, oldAsset, data);
 
   revalidatePath('/inventory')
   revalidatePath(`/inventory/${id}`)
@@ -234,6 +237,7 @@ export async function importAssetsFromCSV(assets: any[]) {
   }
 
   await logAdminAction('IMPORT_ASSETS', null, { count: uniqueBatch.length, imported_serials: Array.from(existingSerials) });
+  await writeAuditLog('IMPORT_ASSETS', null, null, { count: uniqueBatch.length, imported_serials: Array.from(existingSerials) });
 
   revalidatePath('/inventory')
   return { success: true }
@@ -254,6 +258,7 @@ export async function deleteAsset(id: string) {
 
   if (asset) {
     await logAdminAction('DELETE_ASSET', asset.serial_number, { id });
+    await writeAuditLog('DELETE_ASSET', asset.serial_number, asset, null);
   }
 
   revalidatePath('/inventory')
@@ -292,6 +297,8 @@ export async function addLocation(name: string, address?: string) {
     return { success: false, error: error.message };
   }
 
+  await writeAuditLog('ADD_LOCATION', name, null, { name, address });
+
   return { success: true };
 }
 
@@ -308,6 +315,8 @@ export async function addSubLocation(locationId: string, name: string, costCente
     }
     return { success: false, error: error.message };
   }
+
+  await writeAuditLog('ADD_DEPARTMENT', name, null, { name, location_id: locationId, cost_center_code: costCenterCode });
 
   return { success: true };
 }
@@ -326,6 +335,8 @@ export async function addWarehouse(locationId: string, name: string, rackNumber?
     return { success: false, error: error.message };
   }
 
+  await writeAuditLog('ADD_WAREHOUSE', name, null, { name, location_id: locationId, rack_number: rackNumber });
+
   return { success: true };
 }
 
@@ -336,24 +347,47 @@ export async function deleteLocation(locationId: string) {
     return { success: false, error: 'Cannot delete location: assets are currently assigned to this location. Please reassign the assets first.' };
   }
 
+  const { data: oldLoc } = await supabase.from('locations').select('*').eq('id', locationId).single();
+
   const { error } = await supabase.from('locations').delete().eq('id', locationId);
   if (error) return { success: false, error: error.message };
+
+  if (oldLoc) {
+    await writeAuditLog('DELETE_LOCATION', oldLoc.name, oldLoc, null);
+  }
+
   return { success: true };
 }
 
 export async function deleteSubLocation(id: string) {
+  const { data: oldSub } = await supabase.from('sub_locations').select('*').eq('id', id).single();
+
   const { error } = await supabase.from('sub_locations').delete().eq('id', id);
   if (error) return { success: false, error: error.message };
+
+  if (oldSub) {
+    await writeAuditLog('DELETE_DEPARTMENT', oldSub.name, oldSub, null);
+  }
+
   return { success: true };
 }
 
 export async function deleteWarehouse(id: string) {
+  const { data: oldWh } = await supabase.from('warehouses').select('*').eq('id', id).single();
+
   const { error } = await supabase.from('warehouses').delete().eq('id', id);
   if (error) return { success: false, error: error.message };
+
+  if (oldWh) {
+    await writeAuditLog('DELETE_WAREHOUSE', oldWh.name, oldWh, null);
+  }
+
   return { success: true };
 }
 
 export async function updateLocation(id: string, name: string, address?: string) {
+  const { data: oldLoc } = await supabase.from('locations').select('*').eq('id', id).single();
+
   const { error } = await supabase.from('locations').update({
     name,
     address: address || null
@@ -365,10 +399,17 @@ export async function updateLocation(id: string, name: string, address?: string)
     }
     return { success: false, error: error.message };
   }
+
+  if (oldLoc) {
+    await writeAuditLog('EDIT_LOCATION', name, oldLoc, { name, address });
+  }
+
   return { success: true };
 }
 
 export async function updateSubLocation(id: string, name: string, costCenterCode?: string) {
+  const { data: oldSub } = await supabase.from('sub_locations').select('*').eq('id', id).single();
+
   const { error } = await supabase.from('sub_locations').update({
     name,
     cost_center_code: costCenterCode || null
@@ -380,10 +421,17 @@ export async function updateSubLocation(id: string, name: string, costCenterCode
     }
     return { success: false, error: error.message };
   }
+
+  if (oldSub) {
+    await writeAuditLog('EDIT_DEPARTMENT', name, oldSub, { name, cost_center_code: costCenterCode });
+  }
+
   return { success: true };
 }
 
 export async function updateWarehouse(id: string, name: string, rackNumber?: string) {
+  const { data: oldWh } = await supabase.from('warehouses').select('*').eq('id', id).single();
+
   const { error } = await supabase.from('warehouses').update({
     name,
     rack_number: rackNumber || null
@@ -395,6 +443,11 @@ export async function updateWarehouse(id: string, name: string, rackNumber?: str
     }
     return { success: false, error: error.message };
   }
+
+  if (oldWh) {
+    await writeAuditLog('EDIT_WAREHOUSE', name, oldWh, { name, rack_number: rackNumber });
+  }
+
   return { success: true };
 }
 

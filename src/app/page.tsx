@@ -31,7 +31,15 @@ const ACTION_VERBS: Record<string, string> = {
   DISPOSAL: 'was DISPOSED by',
 };
 
+import { getSession } from "@/lib/auth";
+import { ActiveSiteSwitcher } from "@/components/ActiveSiteSwitcher";
+
 export default async function Dashboard() {
+  const session = await getSession();
+  const role = session?.role || 'moderator';
+  const assignedLocationId = session?.assigned_location_id || null;
+  const assignedLocationIds = session?.assigned_location_ids || [];
+
   const { data: allAssets } = await supabase.from('assets').select('id, status, assigned_to');
 
   let totalAssets = 0, availableAssets = 0, assignedAssets = 0, faultyAssets = 0;
@@ -67,6 +75,9 @@ export default async function Dashboard() {
     status: item.status,
   }));
 
+  const { data: locationsData } = await supabase.from('locations').select('id, name');
+  const locations = locationsData || [];
+
   const metrics = {
     totalAssets: totalAssets || 0,
     available: availableAssets || 0,
@@ -76,10 +87,20 @@ export default async function Dashboard() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-3xl font-bold tracking-tight text-primary">Dashboard</h2>
-        <p className="text-muted-foreground mt-1">Overview of your IT inventory and recent activities.</p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 className="text-3xl font-bold tracking-tight text-primary">Dashboard</h2>
+          <p className="text-muted-foreground mt-1">Overview of your IT inventory and recent activities.</p>
+        </div>
       </div>
+
+      {role === 'site_manager' && assignedLocationIds.length > 1 && (
+        <ActiveSiteSwitcher
+          currentLocationId={assignedLocationId}
+          assignedLocationIds={assignedLocationIds}
+          locations={locations}
+        />
+      )}
 
       {/* Metrics */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">

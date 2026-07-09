@@ -8,6 +8,16 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { ArrowLeft, Edit, Laptop, HardDrive, User, History, MapPin, Calendar, Server, Trash2 } from "lucide-react";
 import { getAsset, deleteAsset, updateAsset } from '../actions';
 import { useRouter } from 'next/navigation';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export default function AssetPassportPage({ params }: { params: Promise<{ id: string }> }) {
   // Using React's use() to unwrap the params promise for Next 14+ / App Router
@@ -16,6 +26,8 @@ export default function AssetPassportPage({ params }: { params: Promise<{ id: st
   const [asset, setAsset] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [userRole, setUserRole] = useState<string>('moderator');
+
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
 
   useEffect(() => {
     async function loadData() {
@@ -39,14 +51,19 @@ export default function AssetPassportPage({ params }: { params: Promise<{ id: st
     return <div className="p-8 text-center text-destructive">Asset not found.</div>;
   }
 
-  const handleDelete = async () => {
-    if (window.confirm("Are you sure you want to delete this asset?")) {
-      const result = await deleteAsset(resolvedParams.id);
-      if (result.success) {
-        router.push('/inventory');
-      } else {
-        alert("Error deleting asset: " + result.error);
-      }
+  const handleDelete = () => {
+    setIsDeleteOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    setIsDeleteOpen(false);
+    setIsLoading(true);
+    const result = await deleteAsset(resolvedParams.id);
+    if (result.success) {
+      router.push('/inventory');
+    } else {
+      alert("Error deleting asset: " + result.error);
+      setIsLoading(false);
     }
   };
 
@@ -233,8 +250,26 @@ export default function AssetPassportPage({ params }: { params: Promise<{ id: st
             </CardContent>
           </Card>
         </div>
-        
       </div>
+
+      <AlertDialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-destructive font-bold flex items-center gap-2">
+              <Trash2 className="h-5 w-5" /> Delete Asset?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this asset? This action is permanent and cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmDelete}>
+              Confirm Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

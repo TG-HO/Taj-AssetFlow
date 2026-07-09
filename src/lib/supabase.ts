@@ -5,33 +5,69 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env
 
 export const rawSupabase = createClient(supabaseUrl, supabaseAnonKey);
 
-const TABLES_TO_SCOPE = ['assets', 'admin_logs', 'locations'];
+const TABLES_TO_SCOPE = [
+  'assets',
+  'admin_logs',
+  'locations',
+  'sub_locations',
+  'warehouses',
+  'audit_logs',
+  'item_categories',
+  'inventory_items',
+  'inventory_specs',
+  'employees',
+  'stock_allocations',
+  'site_requests',
+  'notifications',
+  'isp_inventory'
+];
 
-function getClientCompanyId(): string | null {
+function getClientSession(): any | null {
   if (typeof window !== 'undefined') {
     try {
       const sessionStr = localStorage.getItem('tenant_session');
       if (sessionStr) {
-        const session = JSON.parse(sessionStr);
-        return session.company_id || null;
+        return JSON.parse(sessionStr);
       }
     } catch (e) {}
   }
   return null;
 }
 
-async function getServerCompanyId(): Promise<string | null> {
+async function getServerSession(): Promise<any | null> {
   try {
     const { cookies } = await import('next/headers');
     const cookieStore = await cookies();
     const token = cookieStore.get('auth_token')?.value;
     if (token) {
       const decoded = Buffer.from(token, 'base64').toString('utf-8');
-      const session = JSON.parse(decoded);
-      return session.company_id || null;
+      return JSON.parse(decoded);
     }
   } catch (e) {}
   return null;
+}
+
+function injectSessionContext(body: any, companyId: string | null, role: string | null, assignedLocationId: string | null, table: string) {
+  const inject = (obj: any) => {
+    if (obj && typeof obj === 'object') {
+      const tablesWithoutCompanyId = ['sub_locations', 'warehouses', 'inventory_specs'];
+      if (companyId && !tablesWithoutCompanyId.includes(table)) {
+        obj.company_id = companyId;
+      }
+      if (role === 'site_manager' && assignedLocationId) {
+        const locationBoundTables = ['assets', 'inventory_items', 'site_requests', 'isp_inventory', 'stock_allocations', 'sub_locations', 'warehouses', 'employees', 'notifications'];
+        if (locationBoundTables.includes(table)) {
+          const colName = table === 'stock_allocations' ? 'target_location_id' : 'location_id';
+          obj[colName] = assignedLocationId;
+        }
+      }
+    }
+  };
+  if (Array.isArray(body)) {
+    body.forEach(inject);
+  } else {
+    inject(body);
+  }
 }
 
 function createScopedBuilder(builder: any, table: string, actionType?: string): any {
@@ -41,28 +77,55 @@ function createScopedBuilder(builder: any, table: string, actionType?: string): 
         return (onfulfilled: any, onrejected: any) => {
           const run = async () => {
             let companyId: string | null = null;
+            let role: string | null = null;
+            let assignedLocationId: string | null = null;
+
             if (typeof window === 'undefined') {
-              companyId = await getServerCompanyId();
+              const session = await getServerSession();
+              companyId = session?.company_id || null;
+              role = session?.role || null;
+              assignedLocationId = session?.assigned_location_id || null;
             } else {
-              companyId = getClientCompanyId();
+              const session = getClientSession();
+              companyId = session?.company_id || null;
+              role = session?.role || null;
+              assignedLocationId = session?.assigned_location_id || null;
             }
 
             let finalBuilder = target;
             if (companyId) {
+              const tablesWithoutCompanyId = ['sub_locations', 'warehouses', 'inventory_specs'];
               if (actionType !== 'insert') {
-                finalBuilder = finalBuilder.eq('company_id', companyId);
+                if (!tablesWithoutCompanyId.includes(table)) {
+                  finalBuilder = finalBuilder.eq('company_id', companyId);
+                }
+
+                // Site Manager Location Scoping
+                if (role === 'site_manager') {
+                  const activeLoc = assignedLocationId || '00000000-0000-0000-0000-000000000000';
+                  const locationBoundTables = ['assets', 'inventory_items', 'site_requests', 'isp_inventory', 'stock_allocations', 'sub_locations', 'warehouses', 'employees', 'notifications'];
+                  if (locationBoundTables.includes(table)) {
+                    const colName = table === 'stock_allocations' ? 'target_location_id' : 'location_id';
+                    finalBuilder = finalBuilder.eq(colName, activeLoc);
+                  } else if (table === 'locations') {
+                    let assignedIds: string[] = [];
+                    if (typeof window === 'undefined') {
+                      const session = await getServerSession();
+                      assignedIds = session?.assigned_location_ids || [];
+                    } else {
+                      const session = getClientSession();
+                      assignedIds = session?.assigned_location_ids || [];
+                    }
+                    if (assignedIds && assignedIds.length > 0) {
+                      finalBuilder = finalBuilder.in('id', assignedIds);
+                    } else {
+                      finalBuilder = finalBuilder.eq('id', '00000000-0000-0000-0000-000000000000');
+                    }
+                  }
+                }
               } else {
                 if (target.body) {
-                  const inject = (obj: any) => {
-                    if (obj && typeof obj === 'object') {
-                      obj.company_id = companyId;
-                    }
-                  };
-                  if (Array.isArray(target.body)) {
-                    target.body.forEach(inject);
-                  } else {
-                    inject(target.body);
-                  }
+                  injectSessionContext(target.body, companyId, role, assignedLocationId, table);
                 }
               }
             }
@@ -83,18 +146,9 @@ function createScopedBuilder(builder: any, table: string, actionType?: string): 
           }
 
           if (prop === 'insert' && args[0]) {
-            const clientCompanyId = getClientCompanyId();
-            if (clientCompanyId) {
-              const inject = (obj: any) => {
-                if (obj && typeof obj === 'object') {
-                  obj.company_id = clientCompanyId;
-                }
-              };
-              if (Array.isArray(args[0])) {
-                args[0].forEach(inject);
-              } else {
-                inject(args[0]);
-              }
+            const session = getClientSession();
+            if (session) {
+              injectSessionContext(args[0], session.company_id || null, session.role || null, session.assigned_location_id || null, table);
             }
           }
 

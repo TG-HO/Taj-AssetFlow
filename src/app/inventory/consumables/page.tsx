@@ -222,13 +222,19 @@ export default function ConsumablesPage() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-3xl font-bold tracking-tight text-primary flex items-center gap-2">
-            <Package className="h-8 w-8 text-primary" /> Consumables Inventory
+            <Package className="h-8 w-8 text-primary" /> {userRole === 'site_manager' ? 'Available in Stock' : 'Consumables Inventory'}
           </h2>
-          <p className="text-muted-foreground mt-1 text-sm">Manage organizational office supplies, peripheral components, and storage stocks.</p>
+          <p className="text-muted-foreground mt-1 text-sm">
+            {userRole === 'site_manager' 
+              ? 'View hardware, peripherals, and stock received at your location.' 
+              : 'Manage organizational office supplies, peripheral components, and storage stocks.'}
+          </p>
         </div>
-        <Link href="/inventory/add" className={buttonVariants({ variant: "default", className: "gap-2 shrink-0" })}>
-          <Plus className="h-4 w-4" /> Add Consumable
-        </Link>
+        {userRole !== 'site_manager' && (
+          <Link href="/inventory/add" className={buttonVariants({ variant: "default", className: "gap-2 shrink-0" })}>
+            <Plus className="h-4 w-4" /> Add Consumable
+          </Link>
+        )}
       </div>
 
       <div className="flex items-center space-x-2">
@@ -251,25 +257,29 @@ export default function ConsumablesPage() {
               <TableHead className="font-semibold text-foreground py-3">Category</TableHead>
               <TableHead className="font-semibold text-foreground py-3">Primary Location</TableHead>
               <TableHead className="font-semibold text-foreground py-3">Location Details</TableHead>
-              <TableHead className="font-semibold text-foreground py-3">Available Stock</TableHead>
-              <TableHead className="font-semibold text-foreground py-3">Safety Threshold</TableHead>
-              <TableHead className="font-semibold text-foreground py-3 text-right">Actions</TableHead>
+              <TableHead className="font-semibold text-foreground py-3 font-mono">Available Stock</TableHead>
+              {userRole !== 'site_manager' && <TableHead className="font-semibold text-foreground py-3">Safety Threshold</TableHead>}
+              {userRole !== 'site_manager' && <TableHead className="font-semibold text-foreground py-3 text-right">Actions</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-16 text-muted-foreground">
+                <TableCell colSpan={userRole === 'site_manager' ? 5 : 7} className="text-center py-16 text-muted-foreground">
                   <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary mb-2" />
-                  <span>Loading consumables stock...</span>
+                  <span>{userRole === 'site_manager' ? 'Loading available stock...' : 'Loading consumables stock...'}</span>
                 </TableCell>
               </TableRow>
             ) : filteredItems.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-16 text-muted-foreground">
+                <TableCell colSpan={userRole === 'site_manager' ? 5 : 7} className="text-center py-16 text-muted-foreground">
                   <Package className="h-12 w-12 mx-auto text-muted/40 mb-3" />
-                  <p className="font-semibold text-base">No Consumables Found</p>
-                  <p className="text-sm mt-1">Add items using the intake form.</p>
+                  <p className="font-semibold text-base">
+                    {userRole === 'site_manager' ? 'No Available Stock Found' : 'No Consumables Found'}
+                  </p>
+                  <p className="text-sm mt-1">
+                    {userRole === 'site_manager' ? 'Available items will show up here.' : 'Add items using the intake form.'}
+                  </p>
                 </TableCell>
               </TableRow>
             ) : (
@@ -307,17 +317,19 @@ export default function ConsumablesPage() {
                         )}
                       </div>
                     </TableCell>
-                    <TableCell className="text-sm font-mono text-muted-foreground py-4">{item.minimum_safety_stock}</TableCell>
-                    <TableCell className="text-right py-4 space-x-1">
-                      <Button variant="ghost" size="icon" onClick={() => openEditModal(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50">
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      {userRole === 'admin' && (
-                        <Button variant="ghost" size="icon" onClick={() => setDeletingItem(item)} className="h-8 w-8 text-destructive hover:bg-destructive/10">
-                          <Trash2 className="h-4 w-4" />
+                    {userRole !== 'site_manager' && <TableCell className="text-sm font-mono text-muted-foreground py-4">{item.minimum_safety_stock}</TableCell>}
+                    {userRole !== 'site_manager' && (
+                      <TableCell className="text-right py-4 space-x-1">
+                        <Button variant="ghost" size="icon" onClick={() => openEditModal(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50">
+                          <Edit className="h-4 w-4" />
                         </Button>
-                      )}
-                    </TableCell>
+                        {userRole === 'admin' && (
+                          <Button variant="ghost" size="icon" onClick={() => setDeletingItem(item)} className="h-8 w-8 text-destructive hover:bg-destructive/10">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </TableCell>
+                    )}
                   </TableRow>
                 );
               })
@@ -332,7 +344,7 @@ export default function ConsumablesPage() {
           <div className="bg-background border border-muted/50 rounded-xl shadow-2xl w-full max-w-lg p-6 space-y-4 animate-in zoom-in-95 duration-200">
             <div>
               <h3 className="text-lg font-bold text-primary flex items-center gap-2">
-                <Edit className="h-5 w-5 text-primary" /> Edit Consumable Stock
+                <Edit className="h-5 w-5 text-primary" /> {userRole === 'site_manager' ? 'Edit Available Stock Details' : 'Edit Consumable Stock'}
               </h3>
               <p className="text-xs text-muted-foreground mt-0.5">Modify properties for <strong>{editingItem.name}</strong></p>
             </div>

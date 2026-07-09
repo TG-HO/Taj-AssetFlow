@@ -48,6 +48,25 @@ export function Sidebar({ userRole }: { userRole?: string }) {
   const [showSettingsFlyout, setShowSettingsFlyout] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    async function fetchUnreadCount() {
+      try {
+        const { count, error } = await supabase
+          .from('notifications')
+          .select('*', { count: 'exact', head: true })
+          .eq('is_read', false);
+        
+        if (!error && count !== null) {
+          setUnreadCount(count);
+        }
+      } catch (e) {}
+    }
+    fetchUnreadCount();
+    const interval = setInterval(fetchUnreadCount, 15000);
+    return () => clearInterval(interval);
+  }, []);
 
   const [emailAlerts, setEmailAlerts] = useState(true);
   const [autoPassports, setAutoPassports] = useState(true);
@@ -146,16 +165,33 @@ export function Sidebar({ userRole }: { userRole?: string }) {
     router.push('/login');
   };
 
+  const role = profile?.role || userRole || 'moderator';
+
   const links = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
     { name: 'View Inventory', href: '/inventory', icon: List },
-    { name: 'Consumables', href: '/inventory/consumables', icon: Package },
+    { name: role === 'site_manager' ? 'Available in Stock' : 'Consumables', href: '/inventory/consumables', icon: Package },
     { name: 'Faulty / Damaged', href: '/inventory/faulty', icon: List },
     { name: 'Add Asset', href: '/inventory/add', icon: PackagePlus },
-    { name: 'Software Vault', href: '/software-vault', icon: Code2 },
   ];
 
-  if (userRole === 'admin') {
+  if (role !== 'site_manager') {
+    links.push(
+      { name: 'Software Vault', href: '/software-vault', icon: Code2 }
+    );
+  }
+
+  links.push(
+    { name: 'Notifications', href: '/notifications', icon: Bell },
+    { name: 'Site Requests', href: '/site-requests', icon: Package },
+    { name: 'Stock Allocations', href: '/stock-allocations', icon: PackagePlus }
+  );
+
+  if (role === 'admin' || role === 'moderator') {
+    links.push({ name: 'Employees', href: '/employees', icon: Users });
+  }
+
+  if (role === 'admin') {
     links.push({ name: 'Admin Logs', href: '/admin-logs', icon: List });
   }
 
@@ -196,6 +232,11 @@ export function Sidebar({ userRole }: { userRole?: string }) {
               >
                 <Icon size={18} />
                 <span>{link.name}</span>
+                {link.name === 'Notifications' && unreadCount > 0 && (
+                  <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 py-0.5 text-[10px] font-bold text-destructive-foreground animate-pulse">
+                    {unreadCount}
+                  </span>
+                )}
               </Link>
             );
           })}
@@ -203,8 +244,8 @@ export function Sidebar({ userRole }: { userRole?: string }) {
           {/* Settings nav item with hover flyout */}
           <div
             className="relative"
-            onMouseEnter={handleSettingsMouseEnter}
-            onMouseLeave={handleSettingsMouseLeave}
+            onMouseEnter={() => { if (role !== 'site_manager') handleSettingsMouseEnter(); }}
+            onMouseLeave={() => { if (role !== 'site_manager') handleSettingsMouseLeave(); }}
           >
             <button
               type="button"
@@ -214,16 +255,22 @@ export function Sidebar({ userRole }: { userRole?: string }) {
                   ? 'bg-primary text-primary-foreground shadow-sm'
                   : 'text-muted-foreground hover:bg-primary/10 hover:text-primary'
               )}
-              onClick={handleSettingsMouseEnter}
+              onClick={() => {
+                if (role === 'site_manager') {
+                  router.push('/settings?tab=appearance');
+                } else {
+                  handleSettingsMouseEnter();
+                }
+              }}
             >
               <Settings size={18} />
               <span>Settings</span>
             </button>
 
             {/* Settings Flyout Submenu */}
-            {showSettingsFlyout && (
+            {showSettingsFlyout && role !== 'site_manager' && (
               <div
-                className="absolute left-full top-0 ml-2 w-52 bg-white border border-border rounded-xl shadow-xl py-2 z-50 animate-in slide-in-from-left-2 fade-in duration-150"
+                className="absolute left-full bottom-0 ml-2 w-52 bg-white border border-border rounded-xl shadow-xl py-2 z-50 animate-in slide-in-from-left-2 fade-in duration-150"
                 onMouseEnter={handleSettingsMouseEnter}
                 onMouseLeave={handleSettingsMouseLeave}
               >

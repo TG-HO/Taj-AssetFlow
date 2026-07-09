@@ -26,6 +26,7 @@ import {
   Upload,
   FileArchive
 } from "lucide-react";
+import { EmployeeSelect } from "@/components/ui/employee-select";
 import { supabase } from '@/lib/supabase';
 import { getCategories, checkNewSerialNumber, addInventoryItem } from '../item-actions';
 import { addAsset } from '../actions';
@@ -65,7 +66,8 @@ function selectVal(setter: (v: string) => void) {
 
 export default function AddAssetPage() {
   const router = useRouter();
-  const { companyId } = useTenantSession();
+  const { companyId, profile } = useTenantSession();
+  const userRole = profile?.role || 'moderator';
   const [step, setStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
@@ -123,6 +125,12 @@ export default function AddAssetPage() {
     setMaxBytes(limitMb * 1024 * 1024);
     setUploadLimitLabel(limitMb >= 1000 ? `${(limitMb / 1000).toFixed(0)}GB` : `${limitMb}MB`);
   }, []);
+
+  useEffect(() => {
+    if (userRole === 'site_manager') {
+      setSelectedClassification('Asset');
+    }
+  }, [userRole]);
 
   const fmtSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
@@ -521,7 +529,10 @@ export default function AddAssetPage() {
                       setUploadError('');
                     }
                   }}
-                  items={[
+                  disabled={userRole === 'site_manager'}
+                  items={userRole === 'site_manager' ? [
+                    { value: 'Asset', label: 'Assets' }
+                  ] : [
                     { value: 'Asset', label: 'Assets' },
                     { value: 'Consumable', label: 'Consumables' },
                     { value: 'Software', label: 'Software' }
@@ -532,8 +543,12 @@ export default function AddAssetPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="Asset">Assets</SelectItem>
-                    <SelectItem value="Consumable">Consumables</SelectItem>
-                    <SelectItem value="Software">Software</SelectItem>
+                    {userRole !== 'site_manager' && (
+                      <>
+                        <SelectItem value="Consumable">Consumables</SelectItem>
+                        <SelectItem value="Software">Software</SelectItem>
+                      </>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -605,12 +620,27 @@ export default function AddAssetPage() {
               {selectedClassification !== 'Software' && (
                 <div className="space-y-2">
                   <Label htmlFor="status">Condition / Status</Label>
-                  <Select value={statusState} onValueChange={selectVal(setStatusState)} items={STATUS_OPTIONS}>
+                  <Select 
+                    value={statusState} 
+                    onValueChange={selectVal(setStatusState)} 
+                    items={userRole === 'site_manager' ? [
+                      { value: 'New', label: 'New' },
+                      { value: 'Used', label: 'Used' }
+                    ] : STATUS_OPTIONS}
+                  >
                     <SelectTrigger id="status">
                       <SelectValue placeholder="Select Status" />
                     </SelectTrigger>
                     <SelectContent>
-                      {STATUS_OPTIONS.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                      <SelectItem value="New">New</SelectItem>
+                      <SelectItem value="Used">Used</SelectItem>
+                      {userRole !== 'site_manager' && (
+                        <>
+                          <SelectItem value="Faulty">Faulty</SelectItem>
+                          <SelectItem value="Damaged">Damaged</SelectItem>
+                          <SelectItem value="Snatched">Snatched</SelectItem>
+                        </>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -666,7 +696,10 @@ export default function AddAssetPage() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="assigned">Assigned To <span className="text-muted-foreground font-normal">(Optional)</span></Label>
-                    <Input id="assigned" placeholder="e.g. john.doe" value={assignedTo} onChange={e => setAssignedTo(e.target.value)} />
+                    <EmployeeSelect
+                      value={assignedTo}
+                      onChange={(val) => setAssignedTo(val || '')}
+                    />
                   </div>
                 </>
               )}

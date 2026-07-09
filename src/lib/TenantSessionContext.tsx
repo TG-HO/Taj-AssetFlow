@@ -15,15 +15,17 @@ export interface Profile {
   id: string;
   email: string;
   company_id: string;
-  role: 'admin' | 'moderator';
+  role: 'admin' | 'moderator' | 'site_manager';
   full_name?: string | null;
+  assigned_location_id?: string | null;
+  assigned_location_ids?: string[] | null;
 }
 
 interface TenantSessionContextType {
   profile: Profile | null;
   company: Company | null;
   companyId: string | null;
-  role: 'admin' | 'moderator' | null;
+  role: 'admin' | 'moderator' | 'site_manager' | null;
   isLoading: boolean;
 }
 
@@ -78,36 +80,58 @@ export function TenantSessionProvider({ children }: { children: React.ReactNode 
           setProfile(JSON.parse(storedProfile));
           setCompany(JSON.parse(storedCompany));
           setIsLoading(false);
-          return;
         }
 
-        // If not in localStorage, verify via Supabase Session
+        // Verify and sync via Supabase Database and Auth Session in the background
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
           const { data: prof, error: profError } = await supabase
             .from('profiles')
-            .select('id, email, company_id, role, full_name')
+            .select('id, email, company_id, role, full_name, assigned_location_id, assigned_location_ids')
             .eq('id', session.user.id)
             .single();
 
           if (!profError && prof) {
-            // Fetch company details
-            const { data: comp, error: compError } = await supabase
-              .from('companies')
-              .select('id, name, code, logo_url')
-              .eq('id', prof.company_id)
-              .single();
-
-            if (!compError && comp) {
-              localStorage.setItem('tenant_session', JSON.stringify(prof));
-              localStorage.setItem('tenant_company', JSON.stringify(comp));
-              setProfile(prof as Profile);
-              setCompany(comp as Company);
+            // Fetch company details if not already stored
+            let comp = null;
+            if (storedCompany) {
+              comp = JSON.parse(storedCompany);
             } else {
-              setProfile(prof as Profile);
+              const { data: cData } = await supabase
+                .from('companies')
+                .select('id, name, code, logo_url')
+                .eq('id', prof.company_id)
+                .single();
+              comp = cData;
             }
-          } else {
-            // Profile missing: Redirect to setup-error
+
+            // Detect if anything changed
+            let needsUpdate = false;
+            if (storedProfile) {
+              const parsed = JSON.parse(storedProfile);
+              if (
+                parsed.role !== prof.role ||
+                parsed.full_name !== prof.full_name ||
+                parsed.assigned_location_id !== prof.assigned_location_id ||
+                JSON.stringify(parsed.assigned_location_ids) !== JSON.stringify(prof.assigned_location_ids)
+              ) {
+                needsUpdate = true;
+              }
+            } else {
+              needsUpdate = true;
+            }
+
+            if (needsUpdate) {
+              localStorage.setItem('tenant_session', JSON.stringify(prof));
+              if (comp) localStorage.setItem('tenant_company', JSON.stringify(comp));
+              setProfile(prof as Profile);
+              if (comp) setCompany(comp as Company);
+
+              // Dynamically call server action to update cookied session token
+              const { syncSessionCookie } = await import('@/app/users/actions');
+              await syncSessionCookie();
+            }
+          } else if (profError && !storedProfile) {
             router.push('/login/setup-error');
           }
         } else {

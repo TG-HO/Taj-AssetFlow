@@ -3,7 +3,7 @@
 import { useState, use, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useForm } from 'react-hook-form';
+import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,6 +15,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ArrowLeft, ArrowRight, Save, Check } from "lucide-react";
 import { getAsset, updateAsset, checkSerialNumber } from "../../actions";
 import { supabase } from '@/lib/supabase';
+import { cn } from '@/lib/utils';
+import { EmployeeSelect } from '@/components/ui/employee-select';
+import { useTenantSession } from '@/lib/TenantSessionContext';
 
 const formSchema = z.object({
   // Step 1
@@ -25,18 +28,20 @@ const formSchema = z.object({
   storageType: z.enum(['SSD', 'HDD']),
   storageCapacity: z.string().min(1, 'Storage capacity is required'),
   // Step 3
-  assignedTo: z.string().optional(),
+  assignedTo: z.string().optional().nullable(),
   locationId: z.string().uuid('Location is required'),
   subLocationId: z.string().optional().nullable(),
   warehouseId: z.string().optional().nullable(),
   status: z.enum(['New', 'Refub', 'Used', 'Faulty', 'Snatched', 'Damaged']),
-  oldUsername: z.string().optional(),
+  oldUsername: z.string().optional().nullable(),
   // Step 4
-  purchaseDate: z.string().min(1, 'Purchase date is required'),
-  issueDate: z.string().min(1, 'Issue date is required'),
-  details: z.string().optional(),
+  purchaseDate: z.string().optional().nullable(),
+  issueDate: z.string().optional().nullable(),
+  details: z.string().optional().nullable(),
 }).superRefine((data, ctx) => {
-  if (data.status === 'Used' && (!data.oldUsername || data.oldUsername.length === 0)) {
+  const isUnassigned = !data.assignedTo || data.assignedTo.trim() === '' || data.assignedTo.toLowerCase() === 'unassigned';
+
+  if (data.status === 'Used' && (!data.oldUsername || data.oldUsername.trim() === '')) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: "Old Username is mandatory when status is 'Used'",
@@ -44,13 +49,39 @@ const formSchema = z.object({
     });
   }
 
-  if (data.purchaseDate && data.issueDate) {
-    if (new Date(data.issueDate) < new Date(data.purchaseDate)) {
+  // Conditional dates check
+  if (isUnassigned) {
+    if (!data.purchaseDate || data.purchaseDate.trim() === '') {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Issue date cannot be before purchase date",
+        message: "Purchase date is required for unassigned assets",
+        path: ["purchaseDate"],
+      });
+    }
+  } else {
+    // Assigned to employee
+    if (!data.purchaseDate || data.purchaseDate.trim() === '') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Purchase date is required",
+        path: ["purchaseDate"],
+      });
+    }
+    if (!data.issueDate || data.issueDate.trim() === '') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Issue date is required when assigned to an employee",
         path: ["issueDate"],
       });
+    }
+    if (data.purchaseDate && data.issueDate && data.purchaseDate.trim() !== '' && data.issueDate.trim() !== '') {
+      if (new Date(data.issueDate) < new Date(data.purchaseDate)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Issue date cannot be before purchase date",
+          path: ["issueDate"],
+        });
+      }
     }
   }
 });
@@ -65,6 +96,8 @@ const steps = [
 ];
 
 export default function EditAssetPage({ params }: { params: Promise<{ id: string }> }) {
+  const { profile } = useTenantSession();
+  const userRole = profile?.role || 'moderator';
   const router = useRouter();
   const resolvedParams = use(params);
 
@@ -74,7 +107,7 @@ export default function EditAssetPage({ params }: { params: Promise<{ id: string
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const { register, handleSubmit, formState: { errors }, trigger, watch, setValue, setError, reset } = useForm<FormValues>({
+  const { register, handleSubmit, formState: { errors }, trigger, watch, setValue, setError, reset, control } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       laptopName: '',
@@ -98,6 +131,16 @@ export default function EditAssetPage({ params }: { params: Promise<{ id: string
   const statusValue = watch('status');
   const storageTypeValue = watch('storageType');
   const locationIdValue = watch('locationId');
+  const assignedToValue = watch('assignedTo');
+  
+  const isUnassigned = !assignedToValue || assignedToValue.trim() === '' || assignedToValue.toLowerCase() === 'unassigned';
+
+  useEffect(() => {
+    if (isUnassigned) {
+      setValue('subLocationId', null);
+      setValue('issueDate', null);
+    }
+  }, [isUnassigned, setValue]);
 
   const [locationsList, setLocationsList] = useState<any[]>([]);
   const [subLocationsList, setSubLocationsList] = useState<any[]>([]);
@@ -414,7 +457,11 @@ export default function EditAssetPage({ params }: { params: Promise<{ id: string
                     <Select
                       onValueChange={(val: any) => setValue('status', val)}
                       value={watch('status') || ''}
-                      items={[
+                      items={userRole === 'site_manager' ? [
+                        { value: 'New', label: 'New' },
+                        { value: 'Refub', label: 'Refurbished' },
+                        { value: 'Used', label: 'Used' }
+                      ] : [
                         { value: 'New', label: 'New' },
                         { value: 'Refub', label: 'Refurbished' },
                         { value: 'Used', label: 'Used' },
@@ -430,16 +477,29 @@ export default function EditAssetPage({ params }: { params: Promise<{ id: string
                         <SelectItem value="New">New</SelectItem>
                         <SelectItem value="Refub">Refurbished</SelectItem>
                         <SelectItem value="Used">Used</SelectItem>
-                        <SelectItem value="Faulty">Faulty</SelectItem>
-                        <SelectItem value="Snatched">Snatched</SelectItem>
-                        <SelectItem value="Damaged">Damaged (Dead)</SelectItem>
+                        {userRole !== 'site_manager' && (
+                          <>
+                            <SelectItem value="Faulty">Faulty</SelectItem>
+                            <SelectItem value="Snatched">Snatched</SelectItem>
+                            <SelectItem value="Damaged">Damaged (Dead)</SelectItem>
+                          </>
+                        )}
                       </SelectContent>
                     </Select>
                     {errors.status && <p className="text-sm text-destructive">{errors.status.message}</p>}
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="assignedTo">Assigned To (Username) <span className="text-muted-foreground font-normal">(Optional)</span></Label>
-                    <Input id="assignedTo" placeholder="e.g. john.doe" {...register('assignedTo')} />
+                    <Label htmlFor="assignedTo">Assigned To (Employee) <span className="text-muted-foreground font-normal">(Optional)</span></Label>
+                    <Controller
+                      control={control}
+                      name="assignedTo"
+                      render={({ field }) => (
+                        <EmployeeSelect
+                          value={field.value}
+                          onChange={(val) => field.onChange(val)}
+                        />
+                      )}
+                    />
                   </div>
                 </div>
 
@@ -476,36 +536,38 @@ export default function EditAssetPage({ params }: { params: Promise<{ id: string
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-2 duration-300">
                       
                       {/* Department / Sub-location */}
-                      <div className="space-y-2">
-                        <Label htmlFor="subLocationId">Department / Sub-Location</Label>
-                        {subLocationsList.length === 0 ? (
-                          <div className="text-xs text-muted-foreground p-3 border border-dashed rounded bg-background flex flex-col gap-1">
-                            <span>No departments configured.</span>
-                            <Link href="/settings?tab=locations" className="text-primary hover:underline font-semibold">
-                              [Configure Departments]
-                            </Link>
-                          </div>
-                        ) : (
-                          <Select
-                            onValueChange={(val: any) => setValue('subLocationId', val)}
-                            value={watch('subLocationId') || ''}
-                            items={[
-                              { value: 'none', label: 'None / Unassigned' },
-                              ...subLocationsList.map(sub => ({ value: sub.id, label: sub.name }))
-                            ]}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select Department" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">None / Unassigned</SelectItem>
-                              {subLocationsList.map(sub => (
-                                <SelectItem key={sub.id} value={sub.id}>{sub.name}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        )}
-                      </div>
+                      {!isUnassigned && (
+                        <div className="space-y-2">
+                          <Label htmlFor="subLocationId">Department / Sub-Location</Label>
+                          {subLocationsList.length === 0 ? (
+                            <div className="text-xs text-muted-foreground p-3 border border-dashed rounded bg-background flex flex-col gap-1">
+                              <span>No departments configured.</span>
+                              <Link href="/settings?tab=locations" className="text-primary hover:underline font-semibold">
+                                [Configure Departments]
+                              </Link>
+                            </div>
+                          ) : (
+                            <Select
+                              onValueChange={(val: any) => setValue('subLocationId', val)}
+                              value={watch('subLocationId') || ''}
+                              items={[
+                                { value: 'none', label: 'None / Unassigned' },
+                                ...subLocationsList.map(sub => ({ value: sub.id, label: sub.name }))
+                              ]}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select Department" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">None / Unassigned</SelectItem>
+                                {subLocationsList.map(sub => (
+                                  <SelectItem key={sub.id} value={sub.id}>{sub.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </div>
+                      )}
 
                       {/* Warehouse */}
                       <div className="space-y-2">
@@ -554,17 +616,19 @@ export default function EditAssetPage({ params }: { params: Promise<{ id: string
 
               {/* STEP 4: History & Notes */}
               <div className={currentStep === 3 ? 'block space-y-4' : 'hidden'}>
-                <div className="grid grid-cols-2 gap-4">
+                <div className={cn("grid gap-4", isUnassigned ? "grid-cols-1" : "grid-cols-2")}>
                   <div className="space-y-2">
                     <Label htmlFor="purchaseDate">Purchase Date</Label>
                     <Input id="purchaseDate" type="date" {...register('purchaseDate')} />
                     {errors.purchaseDate && <p className="text-sm text-destructive">{errors.purchaseDate.message}</p>}
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="issueDate">Issue Date</Label>
-                    <Input id="issueDate" type="date" {...register('issueDate')} />
-                    {errors.issueDate && <p className="text-sm text-destructive">{errors.issueDate.message}</p>}
-                  </div>
+                  {!isUnassigned && (
+                    <div className="space-y-2">
+                      <Label htmlFor="issueDate">Issue Date</Label>
+                      <Input id="issueDate" type="date" {...register('issueDate')} />
+                      {errors.issueDate && <p className="text-sm text-destructive">{errors.issueDate.message}</p>}
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="details">Details / Remarks <span className="text-muted-foreground font-normal">(Optional)</span></Label>

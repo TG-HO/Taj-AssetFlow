@@ -17,6 +17,16 @@ import { getSoftwarePassport, uploadInstaller, generateDownloadUrl, assignSeat, 
 import { supabase } from '@/lib/supabase';
 import { useTenantSession } from '@/lib/TenantSessionContext';
 import { toast } from '@/components/ui/toast';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 function getSpec(specs: any[], key: string) { return specs?.find((s: any) => s.spec_key === key)?.spec_value || null; }
 function fmtSize(bytes: number) {
@@ -52,7 +62,8 @@ function translateStorageError(raw: string): string {
 export default function SoftwarePassportPage() {
   const params = useParams();
   const router = useRouter();
-  const { companyId } = useTenantSession();
+  const { companyId, profile } = useTenantSession();
+  const userRole = profile?.role || 'moderator';
   const itemId = params.id as string;
 
   const [passport, setPassport] = useState<any | null>(null);
@@ -91,6 +102,7 @@ export default function SoftwarePassportPage() {
   // Delete passport state
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeletingPassport, setIsDeletingPassport] = useState(false);
+  const [installerToDelete, setInstallerToDelete] = useState<any | null>(null);
 
   const loadPassport = useCallback(async () => {
     setIsLoading(true);
@@ -102,7 +114,27 @@ export default function SoftwarePassportPage() {
     finally { setIsLoading(false); }
   }, [itemId]);
 
-  useEffect(() => { loadPassport(); }, [loadPassport]);
+  useEffect(() => {
+    if (userRole === 'site_manager') {
+      setIsLoading(false);
+      return;
+    }
+    loadPassport();
+  }, [loadPassport, userRole]);
+
+  if (userRole === 'site_manager') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-6 space-y-4 animate-in fade-in duration-300">
+        <div className="h-16 w-16 rounded-full bg-destructive/10 text-destructive flex items-center justify-center">
+          <ShieldAlert size={32} />
+        </div>
+        <h2 className="text-2xl font-bold text-primary">Restricted Access</h2>
+        <p className="text-muted-foreground max-w-md">
+          The Software Vault is restricted to IT administrators and moderators. You do not have permission to view or manage software licenses.
+        </p>
+      </div>
+    );
+  }
 
   // ── Upload handlers ──────────────────────────────────────────────
   const validateFile = (file: File): string | null => {
@@ -234,9 +266,15 @@ export default function SoftwarePassportPage() {
     await loadPassport();
   };
 
-  const handleDeleteInstaller = async (installer: any) => {
-    if (!window.confirm(`Delete ${installer.file_name}?`)) return;
-    await deleteInstaller(installer.id, installer.file_path, itemId);
+  const handleDeleteInstaller = (installer: any) => {
+    setInstallerToDelete(installer);
+  };
+
+  const confirmDeleteInstaller = async () => {
+    if (!installerToDelete) return;
+    const temp = installerToDelete;
+    setInstallerToDelete(null);
+    await deleteInstaller(temp.id, temp.file_path, itemId);
     await loadPassport();
   };
 
@@ -572,6 +610,25 @@ export default function SoftwarePassportPage() {
           </div>
         </div>
       )}
+      {/* Delete Installer Confirm Modal */}
+      <AlertDialog open={installerToDelete !== null} onOpenChange={(open) => { if (!open) setInstallerToDelete(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-destructive font-bold flex items-center gap-2">
+              <Trash2 className="h-5 w-5" /> Delete Installer File?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete the installer file <strong>{installerToDelete?.file_name}</strong> from the Software Vault? This will delete it permanently from cloud storage.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmDeleteInstaller}>
+              Confirm Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

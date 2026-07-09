@@ -7,6 +7,9 @@ export interface SessionPayload {
   username: string;
   role: string;
   company_id: string;
+  assigned_location_id?: string | null;
+  assigned_location_ids?: string[] | null;
+  full_name?: string | null;
 }
 
 export async function createSession(payload: SessionPayload) {

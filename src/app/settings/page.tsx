@@ -31,10 +31,30 @@ import {
   Palette,
   Bell,
   Check,
-  Upload
+  Upload,
+  Wifi,
+  DollarSign,
+  Activity
 } from "lucide-react";
 import { supabase } from '@/lib/supabase';
 import { useTenantSession } from '@/lib/TenantSessionContext';
+import { toast } from '@/components/ui/toast';
+import {
+  getIspInventory,
+  addIspRecord,
+  updateIspRecord,
+  deleteIspRecord
+} from './isp-actions';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { 
   addLocation, 
   addSubLocation, 
@@ -46,7 +66,7 @@ import {
   updateSubLocation,
   updateWarehouse
 } from '../inventory/actions';
-import { getUsers, createUser, deleteUser } from '../users/actions';
+import { getUsers, createUser, deleteUser, updateUser } from '../users/actions';
 
 // ─── Color Themes ───────────────────────────────────────────────────
 const COLOR_THEMES = [
@@ -149,8 +169,17 @@ function SettingsContent() {
   const searchParams = useSearchParams();
 
   // Sub-view Level
-  const [locView, setLocView] = useState<'list' | 'sub-locations' | 'warehouses'>('list');
+  const [locView, setLocView] = useState<'list' | 'sub-locations' | 'warehouses' | 'isp'>('list');
   const [selectedLoc, setSelectedLoc] = useState<any | null>(null);
+
+  // ISP connectivity state
+  const [ispRecords, setIspRecords] = useState<any[]>([]);
+  const [isIspLoading, setIsIspLoading] = useState(false);
+  const [ispProvider, setIspProvider] = useState('');
+  const [ispPackage, setIspPackage] = useState('');
+  const [ispBandwidth, setIspBandwidth] = useState(10);
+  const [ispCost, setIspCost] = useState(0);
+  const [isAddingIsp, setIsAddingIsp] = useState(false);
 
   // Modal visibility
   const [isAddLocOpen, setIsAddLocOpen] = useState(false);
@@ -158,6 +187,7 @@ function SettingsContent() {
   const [isAddSubOpen, setIsAddSubOpen] = useState(false);
   const [isEditSubOpen, setIsEditSubOpen] = useState(false);
   const [isAddWhOpen, setIsAddWhOpen] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<{ id: string; username: string } | null>(null);
   const [isEditWhOpen, setIsEditWhOpen] = useState(false);
 
   // Loc form
@@ -202,7 +232,18 @@ function SettingsContent() {
   const [newPassword, setNewPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [newUserRole, setNewUserRole] = useState('moderator');
+  const [newUserLocationId, setNewUserLocationId] = useState('');
+  const [newUserLocationIds, setNewUserLocationIds] = useState<string[]>([]);
   const [isCreatingUser, setIsCreatingUser] = useState(false);
+  const [newFullName, setNewFullName] = useState('');
+
+  // Edit User states
+  const [editingUser, setEditingUser] = useState<any | null>(null);
+  const [editUserRole, setEditUserRole] = useState('moderator');
+  const [editUserLocationId, setEditUserLocationId] = useState('');
+  const [editUserLocationIds, setEditUserLocationIds] = useState<string[]>([]);
+  const [isUpdatingUser, setIsUpdatingUser] = useState(false);
+  const [editUserFullName, setEditUserFullName] = useState('');
 
   // Appearance
   const [activeTheme, setActiveTheme] = useState('blue');
@@ -213,8 +254,12 @@ function SettingsContent() {
   const tabParam = searchParams.get('tab');
   // Reactively read tab from URL — works on mount AND when URL changes within the page
   useEffect(() => {
-    if (tabParam) setActiveTab(tabParam);
-  }, [tabParam]);
+    if (userRole === 'site_manager') {
+      setActiveTab('appearance');
+    } else if (tabParam) {
+      setActiveTab(tabParam);
+    }
+  }, [tabParam, userRole]);
 
   // Restore saved theme and settings on mount only
   useEffect(() => {
@@ -397,14 +442,96 @@ function SettingsContent() {
     else { setErrorMsg(result.error || 'Failed to delete warehouse'); setIsErrorOpen(true); }
   };
 
+  // ── ISP connectivity CRUD ──────────────────────────────────────────
+  const fetchIspRecords = useCallback(async (locationId: string) => {
+    setIsIspLoading(true);
+    const res = await getIspInventory(locationId);
+    if (res.success) {
+      setIspRecords(res.data);
+    }
+    setIsIspLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (locView === 'isp' && selectedLoc) {
+      fetchIspRecords(selectedLoc.id);
+    }
+  }, [locView, selectedLoc, fetchIspRecords]);
+
+  const handleAddIsp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedLoc || !ispProvider.trim() || ispBandwidth < 1 || ispCost < 0) return;
+    setIsAddingIsp(true);
+    const res = await addIspRecord(selectedLoc.id, ispProvider.trim(), ispPackage.trim(), ispBandwidth, ispCost);
+    setIsAddingIsp(false);
+    if (res.success) {
+      setIspProvider('');
+      setIspPackage('');
+      setIspBandwidth(10);
+      setIspCost(0);
+      fetchIspRecords(selectedLoc.id);
+      toast('ISP connection recorded successfully.', 'success');
+    } else {
+      setErrorMsg(res.error || 'Failed to add ISP record');
+      setIsErrorOpen(true);
+    }
+  };
+
+  const handleDeleteIsp = async (id: string) => {
+    const res = await deleteIspRecord(id);
+    if (res.success) {
+      if (selectedLoc) fetchIspRecords(selectedLoc.id);
+      toast('ISP record removed.', 'success');
+    } else {
+      setErrorMsg(res.error || 'Failed to delete ISP record');
+      setIsErrorOpen(true);
+    }
+  };
+
   // ── User CRUD ────────────────────────────────────────────────────
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!newFullName.trim()) {
+      setErrorMsg('Full Name is required.');
+      setIsErrorOpen(true);
+      return;
+    }
     setIsCreatingUser(true);
-    const result = await createUser(newUsername, newPassword, newUserRole);
+    const firstLocId = newUserLocationIds[0] || null;
+    const result = await createUser(newUsername, newPassword, newUserRole, firstLocId, newUserLocationIds, newFullName.trim());
     setIsCreatingUser(false);
-    if (result.success) { setNewUsername(''); setNewPassword(''); setNewUserRole('moderator'); fetchUsersData(); }
+    if (result.success) { 
+      setNewUsername(''); 
+      setNewPassword(''); 
+      setNewFullName('');
+      setNewUserRole('moderator'); 
+      setNewUserLocationId('');
+      setNewUserLocationIds([]);
+      fetchUsersData(); 
+    }
     else { setErrorMsg(result.error || 'Failed to create user'); setIsErrorOpen(true); }
+  };
+
+  const handleUpdateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    if (!editUserFullName.trim()) {
+      setErrorMsg('Full Name is required.');
+      setIsErrorOpen(true);
+      return;
+    }
+    setIsUpdatingUser(true);
+    const firstLocId = editUserLocationIds[0] || null;
+    const result = await updateUser(editingUser.id, editUserRole, firstLocId, editUserLocationIds, editUserFullName.trim());
+    setIsUpdatingUser(false);
+    if (result.success) {
+      setEditingUser(null);
+      setEditUserFullName('');
+      fetchUsersData();
+    } else {
+      setErrorMsg(result.error || 'Failed to update user');
+      setIsErrorOpen(true);
+    }
   };
 
   const handleDeleteUser = async (id: string) => {
@@ -428,7 +555,9 @@ function SettingsContent() {
     notifications: 'Manage alerts, reports, and critical warning preferences.',
     security: 'Review security audits and authentication policies.',
   };
-  const ALL_TABS = [
+  const ALL_TABS = userRole === 'site_manager' ? [
+    { id: 'appearance', label: 'Appearance', icon: Palette },
+  ] : [
     { id: 'locations', label: 'Location Settings', icon: MapPin },
     { id: 'appearance', label: 'Appearance', icon: Palette },
     { id: 'notifications', label: 'Notifications', icon: Bell },
@@ -690,6 +819,108 @@ function SettingsContent() {
                 </Card>
               </div>
             )}
+
+            {/* TIER 4: ISP CONNECTIVITY */}
+            {locView === 'isp' && selectedLoc && (
+              <div className="space-y-4">
+                <Button variant="ghost" onClick={() => setLocView('list')} className="gap-2 hover:bg-muted text-muted-foreground hover:text-foreground">
+                  <ArrowLeft className="h-4 w-4" /> Back to Locations
+                </Button>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  
+                  {/* Add ISP Record */}
+                  <Card className="md:col-span-1 border border-muted/50 shadow-sm h-fit">
+                    <CardHeader className="border-b pb-4 bg-muted/5">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Wifi className="h-5 w-5 text-primary" /> Add ISP Connection
+                      </CardTitle>
+                      <CardDescription>Record ISP details for {selectedLoc.name}</CardDescription>
+                    </CardHeader>
+                    <CardContent className="pt-4">
+                      <form onSubmit={handleAddIsp} className="space-y-4">
+                        <div className="space-y-1.5">
+                          <Label>Provider Name</Label>
+                          <Input placeholder="e.g. PTCL, StormFiber, Nayatel" value={ispProvider} onChange={e => setIspProvider(e.target.value)} required />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>Bandwidth (Mbps)</Label>
+                          <Input type="number" min={1} value={ispBandwidth} onChange={e => setIspBandwidth(Math.max(1, parseInt(e.target.value) || 1))} required />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>Monthly Cost (PKR)</Label>
+                          <Input type="number" min={0} value={ispCost} onChange={e => setIspCost(Math.max(0, parseFloat(e.target.value) || 0))} required />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>Package Details (Optional)</Label>
+                          <Input placeholder="e.g. 5 IP Block, Enterprise Fiber" value={ispPackage} onChange={e => setIspPackage(e.target.value)} />
+                        </div>
+                        <Button type="submit" className="w-full" disabled={isAddingIsp}>
+                          {isAddingIsp ? 'Adding...' : 'Add ISP Connection'}
+                        </Button>
+                      </form>
+                    </CardContent>
+                  </Card>
+
+                  {/* ISP Connections List */}
+                  <Card className="md:col-span-2 border border-muted/50 overflow-hidden shadow-sm">
+                    <CardHeader className="border-b pb-4 bg-muted/5">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Activity className="h-5 w-5 text-primary" /> ISP Connections
+                      </CardTitle>
+                      <CardDescription>ISP connections registered to this location.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      {isIspLoading ? (
+                        <div className="text-center py-8">
+                          <Loader2 className="h-6 w-6 animate-spin mx-auto text-primary" />
+                        </div>
+                      ) : ispRecords.length === 0 ? (
+                        <div className="p-8 text-center text-muted-foreground text-sm">
+                          No ISP records found for this location.
+                        </div>
+                      ) : (
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="hover:bg-transparent bg-muted/10">
+                              <TableHead className="font-semibold text-foreground py-3">ISP Provider</TableHead>
+                              <TableHead className="font-semibold text-foreground py-3">Speed</TableHead>
+                              <TableHead className="font-semibold text-foreground py-3">Cost</TableHead>
+                              <TableHead className="font-semibold text-foreground py-3 text-right">Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {ispRecords.map((rec: any) => (
+                              <TableRow key={rec.id} className="hover:bg-muted/10">
+                                <TableCell className="font-semibold text-foreground py-3">
+                                  {rec.provider_name}
+                                  {rec.package_details && (
+                                    <div className="text-[10px] text-muted-foreground font-normal">{rec.package_details}</div>
+                                  )}
+                                </TableCell>
+                                <TableCell className="py-3">
+                                  <Badge className="bg-primary/10 text-primary border-none text-[11px] font-semibold">
+                                    {rec.bandwidth_mbps} Mbps
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="py-3 text-sm font-semibold">
+                                  PKR {parseFloat(rec.recurring_cost).toLocaleString()} /mo
+                                </TableCell>
+                                <TableCell className="py-3 text-right">
+                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                                    onClick={() => handleDeleteIsp(rec.id)}>
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -830,6 +1061,10 @@ function SettingsContent() {
               <CardContent>
                 <form onSubmit={handleCreateUser} className="space-y-4">
                   <div className="space-y-1.5">
+                    <Label htmlFor="fullname">Full Name</Label>
+                    <Input id="fullname" placeholder="John Doe" value={newFullName} onChange={e => setNewFullName(e.target.value)} required />
+                  </div>
+                  <div className="space-y-1.5">
                     <Label htmlFor="username">Email Address</Label>
                     <Input id="username" type="email" placeholder="user@tajgasoline.com" value={newUsername} onChange={e => setNewUsername(e.target.value)} required />
                   </div>
@@ -846,15 +1081,44 @@ function SettingsContent() {
                     <Label htmlFor="role">Role Permission</Label>
                     <Select value={newUserRole} onValueChange={val => { if (val) setNewUserRole(val); }} items={[
                       { value: 'moderator', label: 'Moderator (Read/Write)' },
-                      { value: 'admin', label: 'Admin (Full Access)' }
+                      { value: 'admin', label: 'Admin (Full Access)' },
+                      { value: 'site_manager', label: 'Site Manager (Branch Restricted)' }
                     ]}>
                       <SelectTrigger id="role"><SelectValue placeholder="Select role" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="moderator">Moderator (Read/Write)</SelectItem>
                         <SelectItem value="admin">Admin (Full Access)</SelectItem>
+                        <SelectItem value="site_manager">Site Manager (Branch Restricted)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
+                  {newUserRole === 'site_manager' && (
+                    <div className="space-y-2 animate-in fade-in duration-150 border rounded-lg p-3 bg-muted/10">
+                      <Label className="font-semibold text-xs text-primary">Assigned Branches (Select Multiple)</Label>
+                      <div className="space-y-2 mt-2 max-h-36 overflow-y-auto">
+                        {locations.map(loc => {
+                          const checked = newUserLocationIds.includes(loc.id);
+                          return (
+                            <label key={loc.id} className="flex items-center gap-2.5 text-sm font-normal cursor-pointer select-none">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                className="rounded border-input text-primary focus:ring-primary h-4 w-4"
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setNewUserLocationIds([...newUserLocationIds, loc.id]);
+                                  } else {
+                                    setNewUserLocationIds(newUserLocationIds.filter(id => id !== loc.id));
+                                  }
+                                }}
+                              />
+                              <span>{loc.name}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                   <Button type="submit" className="w-full" disabled={isCreatingUser}>
                     {isCreatingUser ? 'Creating...' : 'Create User'}
                   </Button>
@@ -891,23 +1155,62 @@ function SettingsContent() {
                       <TableRow key={user.id} className="hover:bg-muted/10">
                         <TableCell className="py-3.5">
                           <div className="flex items-center gap-2.5">
-                            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-sm">
-                              {user.username.slice(0, 2).toUpperCase()}
+                            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-sm shrink-0">
+                              {(user.full_name || user.username).slice(0, 2).toUpperCase()}
                             </div>
-                            <span className="font-semibold text-foreground">{user.username}</span>
+                            <div className="flex flex-col">
+                              <span className="font-semibold text-foreground leading-snug">{user.full_name || user.username.split('@')[0]}</span>
+                              <span className="text-[10px] text-muted-foreground">{user.username}</span>
+                            </div>
                           </div>
                         </TableCell>
                         <TableCell className="py-3.5">
-                          <Badge variant={user.role === 'admin' ? 'default' : 'secondary'} className="gap-1 font-semibold">
-                            {user.role === 'admin' && <Shield className="h-3 w-3" />}
-                            {user.role}
-                          </Badge>
+                          <div className="flex flex-col gap-0.5">
+                            <Badge variant={user.role === 'admin' ? 'default' : user.role === 'site_manager' ? 'outline' : 'secondary'} className="w-fit gap-1 font-semibold">
+                              {user.role === 'admin' && <Shield className="h-3 w-3" />}
+                              {user.role}
+                            </Badge>
+                            {user.role === 'site_manager' && (
+                              <div className="flex flex-wrap gap-1 mt-1.5">
+                                {user.assigned_location_ids && user.assigned_location_ids.length > 0 ? (
+                                  user.assigned_location_ids.map((locId: string) => {
+                                    const name = locations.find(l => l.id === locId)?.name || 'Unknown';
+                                    const isActive = user.assigned_location_id === locId;
+                                    return (
+                                      <Badge
+                                        key={locId}
+                                        variant={isActive ? 'default' : 'outline'}
+                                        className="text-[9px] px-1 py-0 font-semibold"
+                                      >
+                                        {name} {isActive && '• active'}
+                                      </Badge>
+                                    );
+                                  })
+                                ) : (
+                                  <span className="text-[10px] text-muted-foreground italic">No assigned sites</span>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </TableCell>
-                        <TableCell className="py-3.5 text-right">
+                        <TableCell className="py-3.5 text-right space-x-1.5">
+                          <Button
+                            variant="ghost" size="icon"
+                            className="text-primary hover:bg-primary/10"
+                            onClick={() => {
+                              setEditingUser(user);
+                              setEditUserRole(user.role);
+                              setEditUserLocationId(user.assigned_location_id || '');
+                              setEditUserLocationIds(user.assigned_location_ids || []);
+                              setEditUserFullName(user.full_name || '');
+                            }}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
                           <Button
                             variant="ghost" size="icon"
                             className="text-destructive hover:bg-destructive/10"
-                            onClick={() => { if (window.confirm(`Delete user ${user.username}?`)) handleDeleteUser(user.id); }}
+                            onClick={() => setUserToDelete({ id: user.id, username: user.username })}
                             disabled={user.id === profile?.id}
                           >
                             <Trash2 className="h-4 w-4" />
@@ -946,6 +1249,10 @@ function SettingsContent() {
                   className="w-full text-left px-4 py-2 text-sm text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors font-medium">
                   View Warehouses
                 </button>
+                <button onClick={() => { setSelectedLoc(loc); setLocView('isp'); setOpenMenuId(null); }}
+                  className="w-full text-left px-4 py-2 text-sm text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors font-medium">
+                  View ISP Connectivity
+                </button>
                 <div className="my-1 mx-3 border-t border-border/50" />
                 <button onClick={() => { setEditLocId(loc.id); setEditLocName(loc.name); setEditLocAddress(loc.address || ''); setIsEditLocOpen(true); setOpenMenuId(null); }}
                   className="w-full text-left px-4 py-2 text-sm text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors font-medium">
@@ -965,10 +1272,9 @@ function SettingsContent() {
       {/* MODALS                                                       */}
       {/* ──────────────────────────────────────────────────────────── */}
 
-      {/* Add Location */}
       {isAddLocOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-background border border-primary/20 p-6 rounded-xl shadow-xl w-full max-w-md space-y-4 animate-in zoom-in-95 duration-200">
+          <div className="bg-background border border-primary/20 p-6 rounded-xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto space-y-4 animate-in zoom-in-95 duration-200">
             <h3 className="text-lg font-bold text-primary">Add Primary Location</h3>
             <form onSubmit={handleAddLocation} className="space-y-4">
               <div className="space-y-2"><Label>Location Name</Label><Input placeholder="e.g. Karachi HQ" value={newLocName} onChange={e => setNewLocName(e.target.value)} required /></div>
@@ -982,10 +1288,9 @@ function SettingsContent() {
         </div>
       )}
 
-      {/* Edit Location */}
       {isEditLocOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-background border border-primary/20 p-6 rounded-xl shadow-xl w-full max-w-md space-y-4 animate-in zoom-in-95 duration-200">
+          <div className="bg-background border border-primary/20 p-6 rounded-xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto space-y-4 animate-in zoom-in-95 duration-200">
             <h3 className="text-lg font-bold text-primary">Edit Location</h3>
             <form onSubmit={handleEditLocation} className="space-y-4">
               <div className="space-y-2"><Label>Location Name</Label><Input value={editLocName} onChange={e => setEditLocName(e.target.value)} required /></div>
@@ -999,10 +1304,9 @@ function SettingsContent() {
         </div>
       )}
 
-      {/* Delete Location Confirm */}
       {deleteConfirmLoc && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-background border border-destructive/20 p-6 rounded-xl shadow-xl w-full max-w-md space-y-4 animate-in zoom-in-95 duration-200">
+          <div className="bg-background border border-destructive/20 p-6 rounded-xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto space-y-4 animate-in zoom-in-95 duration-200">
             <div className="flex items-center gap-3 text-destructive"><AlertTriangle className="h-6 w-6" /><h3 className="text-lg font-bold">Delete Location?</h3></div>
             <div className="text-xs text-destructive bg-destructive/10 border border-destructive/25 p-3 rounded space-y-1">
               <p className="font-semibold">This will permanently delete:</p>
@@ -1019,10 +1323,9 @@ function SettingsContent() {
         </div>
       )}
 
-      {/* Add Department */}
       {isAddSubOpen && selectedLoc && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-background border border-primary/20 p-6 rounded-xl shadow-xl w-full max-w-md space-y-4 animate-in zoom-in-95 duration-200">
+          <div className="bg-background border border-primary/20 p-6 rounded-xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto space-y-4 animate-in zoom-in-95 duration-200">
             <h3 className="text-lg font-bold text-primary">Add Department</h3>
             <form onSubmit={handleAddSub} className="space-y-4">
               <div className="space-y-2"><Label>Department Name</Label><Input placeholder="e.g. IT Support" value={newSubName} onChange={e => setNewSubName(e.target.value)} required /></div>
@@ -1037,10 +1340,9 @@ function SettingsContent() {
         </div>
       )}
 
-      {/* Edit Department */}
       {isEditSubOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-background border border-primary/20 p-6 rounded-xl shadow-xl w-full max-w-md space-y-4 animate-in zoom-in-95 duration-200">
+          <div className="bg-background border border-primary/20 p-6 rounded-xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto space-y-4 animate-in zoom-in-95 duration-200">
             <h3 className="text-lg font-bold text-primary">Edit Department</h3>
             <form onSubmit={handleEditSub} className="space-y-4">
               <div className="space-y-2"><Label>Department Name</Label><Input value={editSubName} onChange={e => setEditSubName(e.target.value)} required /></div>
@@ -1051,10 +1353,9 @@ function SettingsContent() {
         </div>
       )}
 
-      {/* Delete Department */}
       {deleteConfirmSub && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-background border border-destructive/20 p-6 rounded-xl shadow-xl w-full max-w-md space-y-4 animate-in zoom-in-95 duration-200">
+          <div className="bg-background border border-destructive/20 p-6 rounded-xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto space-y-4 animate-in zoom-in-95 duration-200">
             <div className="flex items-center gap-3 text-destructive"><AlertTriangle className="h-6 w-6" /><h3 className="text-lg font-bold">Delete Department?</h3></div>
             <p className="text-sm text-muted-foreground">Are you sure you want to delete <strong>{deleteConfirmSub.name}</strong>?</p>
             <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setDeleteConfirmSub(null)}>Cancel</Button><Button variant="destructive" onClick={() => handleDeleteSub(deleteConfirmSub)}>Delete</Button></div>
@@ -1062,10 +1363,9 @@ function SettingsContent() {
         </div>
       )}
 
-      {/* Add Warehouse */}
       {isAddWhOpen && selectedLoc && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-background border border-primary/20 p-6 rounded-xl shadow-xl w-full max-w-md space-y-4 animate-in zoom-in-95 duration-200">
+          <div className="bg-background border border-primary/20 p-6 rounded-xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto space-y-4 animate-in zoom-in-95 duration-200">
             <h3 className="text-lg font-bold text-primary">Add Warehouse</h3>
             <form onSubmit={handleAddWh} className="space-y-4">
               <div className="space-y-2"><Label>Warehouse / Zone Name</Label><Input placeholder="e.g. Storage Room B" value={newWhName} onChange={e => setNewWhName(e.target.value)} required /></div>
@@ -1080,10 +1380,9 @@ function SettingsContent() {
         </div>
       )}
 
-      {/* Edit Warehouse */}
       {isEditWhOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-background border border-primary/20 p-6 rounded-xl shadow-xl w-full max-w-md space-y-4 animate-in zoom-in-95 duration-200">
+          <div className="bg-background border border-primary/20 p-6 rounded-xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto space-y-4 animate-in zoom-in-95 duration-200">
             <h3 className="text-lg font-bold text-primary">Edit Warehouse</h3>
             <form onSubmit={handleEditWh} className="space-y-4">
               <div className="space-y-2"><Label>Warehouse / Zone Name</Label><Input value={editWhName} onChange={e => setEditWhName(e.target.value)} required /></div>
@@ -1094,10 +1393,9 @@ function SettingsContent() {
         </div>
       )}
 
-      {/* Delete Warehouse */}
       {deleteConfirmWh && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-background border border-destructive/20 p-6 rounded-xl shadow-xl w-full max-w-md space-y-4 animate-in zoom-in-95 duration-200">
+          <div className="bg-background border border-destructive/20 p-6 rounded-xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto space-y-4 animate-in zoom-in-95 duration-200">
             <div className="flex items-center gap-3 text-destructive"><AlertTriangle className="h-6 w-6" /><h3 className="text-lg font-bold">Delete Warehouse?</h3></div>
             <p className="text-sm text-muted-foreground">Are you sure you want to delete <strong>{deleteConfirmWh.name}</strong>?</p>
             <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setDeleteConfirmWh(null)}>Cancel</Button><Button variant="destructive" onClick={() => handleDeleteWh(deleteConfirmWh)}>Delete</Button></div>
@@ -1116,6 +1414,101 @@ function SettingsContent() {
         </div>
       )}
 
+      {/* Delete User Confirm */}
+      <AlertDialog open={userToDelete !== null} onOpenChange={(open) => { if (!open) setUserToDelete(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-destructive font-bold flex items-center gap-2">
+              <Trash2 className="h-5 w-5" /> Delete User Account?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete the user account <strong>{userToDelete?.username}</strong>? They will immediately lose access to Taj AssetFlow.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={async () => {
+              if (userToDelete) {
+                await handleDeleteUser(userToDelete.id);
+                setUserToDelete(null);
+              }
+            }}>
+              Confirm Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Edit User Modal */}
+      {editingUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-background border border-muted/50 rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4 animate-in zoom-in-95 duration-200">
+            <div>
+              <h3 className="text-lg font-bold text-primary flex items-center gap-2">
+                <Edit className="h-5 w-5 text-primary" /> Edit User Profile
+              </h3>
+              <p className="text-xs text-muted-foreground mt-0.5">Modify permissions and site bindings for <strong>{editingUser.username}</strong></p>
+            </div>
+            
+            <form onSubmit={handleUpdateUser} className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-fullname">Full Name</Label>
+                <Input id="edit-fullname" placeholder="John Doe" value={editUserFullName} onChange={e => setEditUserFullName(e.target.value)} required />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-user-role">Role Permission</Label>
+                <Select value={editUserRole} onValueChange={val => { if (val) setEditUserRole(val); }} items={[
+                  { value: 'moderator', label: 'Moderator (Read/Write)' },
+                  { value: 'admin', label: 'Admin (Full Access)' },
+                  { value: 'site_manager', label: 'Site Manager (Branch Restricted)' }
+                ]}>
+                  <SelectTrigger id="edit-user-role"><SelectValue placeholder="Select role" /></SelectTrigger>
+                  <SelectContent className="z-[99999]">
+                    <SelectItem value="moderator">Moderator (Read/Write)</SelectItem>
+                    <SelectItem value="admin">Admin (Full Access)</SelectItem>
+                    <SelectItem value="site_manager">Site Manager (Branch Restricted)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {editUserRole === 'site_manager' && (
+                <div className="space-y-2 border rounded-lg p-3 bg-muted/10">
+                  <Label className="font-semibold text-xs text-primary">Assigned Branches (Select Multiple)</Label>
+                  <div className="space-y-2 mt-2 max-h-36 overflow-y-auto">
+                    {locations.map(loc => {
+                      const checked = editUserLocationIds.includes(loc.id);
+                      return (
+                        <label key={loc.id} className="flex items-center gap-2.5 text-sm font-normal cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            className="rounded border-input text-primary focus:ring-primary h-4 w-4"
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setEditUserLocationIds([...editUserLocationIds, loc.id]);
+                              } else {
+                                setEditUserLocationIds(editUserLocationIds.filter(id => id !== loc.id));
+                              }
+                            }}
+                          />
+                          <span>{loc.name}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-2">
+                <Button type="button" variant="outline" onClick={() => setEditingUser(null)} disabled={isUpdatingUser}>Cancel</Button>
+                <Button type="submit" disabled={isUpdatingUser}>
+                  {isUpdatingUser ? 'Saving...' : 'Save Changes'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -11,6 +11,7 @@ import {
   ExternalLink, Key, Users, Calendar, ShieldAlert
 } from 'lucide-react';
 import { getSoftwareItems } from './actions';
+import { useTenantSession } from '@/lib/TenantSessionContext';
 
 function getSpec(specs: any[], key: string) {
   return specs?.find((s: any) => s.spec_key === key)?.spec_value || null;
@@ -23,12 +24,19 @@ function daysUntilExpiry(expiryDate: string | null): number | null {
 }
 
 export default function SoftwareVaultPage() {
+  const { profile } = useTenantSession();
+  const userRole = profile?.role || 'moderator';
+
   const [items, setItems] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (userRole === 'site_manager') {
+      setIsLoading(false);
+      return;
+    }
     async function load() {
       setIsLoading(true);
       try {
@@ -41,7 +49,21 @@ export default function SoftwareVaultPage() {
       }
     }
     load();
-  }, []);
+  }, [userRole]);
+
+  if (userRole === 'site_manager') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-6 space-y-4 animate-in fade-in duration-300">
+        <div className="h-16 w-16 rounded-full bg-destructive/10 text-destructive flex items-center justify-center">
+          <ShieldAlert size={32} />
+        </div>
+        <h2 className="text-2xl font-bold text-primary">Restricted Access</h2>
+        <p className="text-muted-foreground max-w-md">
+          The Software Vault is restricted to IT administrators and moderators. You do not have permission to view or manage software licenses.
+        </p>
+      </div>
+    );
+  }
 
   const filtered = items.filter(item =>
     item.name.toLowerCase().includes(search.toLowerCase()) ||

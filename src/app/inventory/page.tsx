@@ -19,6 +19,16 @@ import { Label } from "@/components/ui/label";
 import { Search, Plus, FileUp, FileDown, Eye, Edit, Trash2, ArrowUpDown, Check, ChevronDown, ArrowRightLeft, RotateCcw, AlertCircle, Loader2 } from "lucide-react";
 import { deleteAsset } from './actions';
 import { cn } from "@/lib/utils";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export default function InventoryPage() {
   const [search, setSearch] = useState('');
@@ -37,6 +47,7 @@ export default function InventoryPage() {
   // Custody modals
   const [checkoutItem, setCheckoutItem] = useState<any | null>(null);
   const [checkinItem, setCheckinItem] = useState<any | null>(null);
+  const [deleteItemId, setDeleteItemId] = useState<string | null>(null);
   const [custodyRecipient, setCustodyRecipient] = useState('');
   const [custodyCondition, setCustodyCondition] = useState('');
   const [custodyStatus, setCustodyStatus] = useState<string>('New');
@@ -281,14 +292,20 @@ export default function InventoryPage() {
     return `${diff.toFixed(1)} yrs`;
   };
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm("Are you sure you want to delete this asset?")) {
-      const result = await deleteAsset(id);
-      if (result.success) {
-        fetchInventory();
-      } else {
-        alert("Error deleting asset: " + result.error);
-      }
+  const handleDelete = (id: string) => {
+    setDeleteItemId(id);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteItemId) return;
+    setIsLoading(true);
+    const result = await deleteAsset(deleteItemId);
+    setDeleteItemId(null);
+    if (result.success) {
+      fetchInventory();
+    } else {
+      alert("Error deleting asset: " + result.error);
+      setIsLoading(false);
     }
   };
 
@@ -681,6 +698,25 @@ export default function InventoryPage() {
         </div>
       </div>
     )}
+
+    <AlertDialog open={deleteItemId !== null} onOpenChange={(open) => { if (!open) setDeleteItemId(null); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle className="text-destructive font-bold flex items-center gap-2">
+            <Trash2 className="h-5 w-5" /> Delete Asset?
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            Are you sure you want to delete this asset? This action is permanent and cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" onClick={confirmDelete}>
+            Confirm Delete
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     </>
   );
 }
