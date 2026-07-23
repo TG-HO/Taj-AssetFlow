@@ -580,17 +580,19 @@ export default function InventoryPage() {
                       <span className="sr-only">Edit</span>
                     </Link>
                     {/* Checkout button */}
-                    <button
-                      type="button"
-                      title={['Faulty','Damaged','Snatched'].includes(item.status) ? `Cannot issue — status is ${item.status}` : 'Issue / Checkout'}
-                      disabled={['Faulty','Damaged','Snatched'].includes(item.status)}
-                      onClick={() => { setCheckoutItem(item); setCustodyRecipient(''); setCustodyCondition(''); setCustodyDeptId(''); setCustodyError(''); }}
-                      className={cn('p-1.5 rounded-md transition-colors', ['Faulty','Damaged','Snatched'].includes(item.status) ? 'opacity-30 cursor-not-allowed' : 'text-blue-600 hover:bg-blue-50')}
-                    >
-                      <ArrowRightLeft className="h-3.5 w-3.5" />
-                    </button>
+                    {userRole !== 'site_manager' && (
+                      <button
+                        type="button"
+                        title={['Faulty','Damaged','Snatched'].includes(item.status) ? `Cannot issue — status is ${item.status}` : 'Issue / Checkout'}
+                        disabled={['Faulty','Damaged','Snatched'].includes(item.status)}
+                        onClick={() => { setCheckoutItem(item); setCustodyRecipient(''); setCustodyCondition(''); setCustodyDeptId(''); setCustodyError(''); }}
+                        className={cn('p-1.5 rounded-md transition-colors', ['Faulty','Damaged','Snatched'].includes(item.status) ? 'opacity-30 cursor-not-allowed' : 'text-blue-600 hover:bg-blue-50')}
+                      >
+                        <ArrowRightLeft className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                     {/* Check-In button */}
-                    {item.status === 'Used' && (
+                    {userRole !== 'site_manager' && item.status === 'Used' && (
                       <button
                         type="button"
                         title="Return / Check-In"

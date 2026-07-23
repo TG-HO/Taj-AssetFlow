@@ -51,8 +51,8 @@ export async function addAsset(data: any) {
     warehouse_id: data.warehouseId || null,
     status: data.status,
     old_username: data.oldUsername || null,
-    purchase_date: data.purchaseDate || null,
-    issue_date: data.issueDate || null,
+    purchase_date: data.purchaseDate || new Date().toISOString().split('T')[0],
+    issue_date: data.issueDate || new Date().toISOString().split('T')[0],
     details: data.details || null,
   })
 
