@@ -4,17 +4,17 @@
     "type": "split",
     "children": [
       {
-        "id": "d679f65441899276",
+        "id": "fe0c2391dcd299eb",
         "type": "tabs",
         "children": [
           {
-            "id": "2038cacdb31dff08",
+            "id": "3260d350c80cde08",
             "type": "leaf",
             "state": {
-              "type": "graph",
+              "type": "empty",
               "state": {},
-              "icon": "lucide-git-fork",
-              "title": "Graph view"
+              "icon": "lucide-file",
+              "title": "New tab"
             }
           }
         ]
@@ -176,8 +176,10 @@
       "bases:Create new base": false
     }
   },
-  "active": "2038cacdb31dff08",
+  "active": "728b2c59eb93845b",
   "lastOpenFiles": [
+    "Untitled.md",
+    "Untitled",
     "Site Requests Module.md",
     "Security and RLS Scoping Model.md",
     "00 Hub (MOC).md",

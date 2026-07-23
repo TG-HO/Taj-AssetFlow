@@ -68,7 +68,12 @@ export function ActiveSiteSwitcher({
         </div>
         <div className="w-full sm:w-64 flex items-center gap-2">
           {isUpdating && <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />}
-          <Select value={selectedLoc} onValueChange={handleSwitch} disabled={isUpdating}>
+          <Select 
+            value={selectedLoc} 
+            onValueChange={handleSwitch} 
+            disabled={isUpdating}
+            items={assignedLocs.map(loc => ({ value: loc.id, label: loc.name }))}
+          >
             <SelectTrigger className="w-full">
               <SelectValue placeholder="Choose active site..." />
             </SelectTrigger>

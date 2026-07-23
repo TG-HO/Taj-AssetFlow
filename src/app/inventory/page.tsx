@@ -409,7 +409,7 @@ export default function InventoryPage() {
             <TableRow>
               <TableHead className="w-[12%] font-semibold">Serial Number</TableHead>
               <TableHead className="w-[15%] font-semibold">Laptop Name</TableHead>
-              <TableHead className="w-[12%] font-semibold">User</TableHead>
+              {userRole !== 'site_manager' && <TableHead className="w-[12%] font-semibold">User</TableHead>}
               <TableHead className="w-[12%] font-semibold relative">
                 <div className="relative">
                   <button 
@@ -525,13 +525,13 @@ export default function InventoryPage() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center h-24 text-muted-foreground">
+                <TableCell colSpan={userRole === 'site_manager' ? 7 : 8} className="text-center h-24 text-muted-foreground">
                   Loading assets...
                 </TableCell>
               </TableRow>
             ) : filteredInventory.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center h-24 text-muted-foreground">
+                <TableCell colSpan={userRole === 'site_manager' ? 7 : 8} className="text-center h-24 text-muted-foreground">
                   No assets found.
                 </TableCell>
               </TableRow>
@@ -540,7 +540,9 @@ export default function InventoryPage() {
                 <TableRow key={item.id}>
                   <TableCell className="font-medium truncate" title={item.serialNumber}>{item.serialNumber}</TableCell>
                   <TableCell className="truncate" title={item.laptopName}>{item.laptopName}</TableCell>
-                  <TableCell className="truncate" title={item.assignedTo}>{item.assignedTo}</TableCell>
+                  {userRole !== 'site_manager' && (
+                    <TableCell className="truncate" title={item.assignedTo}>{item.assignedTo}</TableCell>
+                  )}
                   <TableCell className="truncate">
                     <div className="flex flex-col">
                       <span className="font-semibold text-foreground truncate" title={item.location}>{item.location}</span>

@@ -694,13 +694,15 @@ export default function AddAssetPage() {
                       </Select>
                     </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="assigned">Assigned To <span className="text-muted-foreground font-normal">(Optional)</span></Label>
-                    <EmployeeSelect
-                      value={assignedTo}
-                      onChange={(val) => setAssignedTo(val || '')}
-                    />
-                  </div>
+                  {userRole !== 'site_manager' && (
+                    <div className="space-y-2">
+                      <Label htmlFor="assigned">Assigned To <span className="text-muted-foreground font-normal">(Optional)</span></Label>
+                      <EmployeeSelect
+                        value={assignedTo}
+                        onChange={(val) => setAssignedTo(val || '')}
+                      />
+                    </div>
+                  )}
                 </>
               )}
 
@@ -827,7 +829,7 @@ export default function AddAssetPage() {
                     </Select>
                   )}
                 </div>
-                {locationId && selectedClassification !== 'Software' && (
+                {locationId && selectedClassification !== 'Software' && userRole !== 'site_manager' && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in duration-300">
                     <div className="space-y-2">
                       <Label>Department / Sub-Location</Label>
@@ -911,7 +913,7 @@ export default function AddAssetPage() {
                     { label: 'Part Number', value: partNumber || '—' },
                     { label: 'RAM', value: ram || '—' },
                     { label: 'Storage', value: [storageType, storageCapacity].filter(Boolean).join(' · ') || '—' },
-                    { label: 'Assigned To', value: assignedTo || 'Unassigned' },
+                    ...(userRole !== 'site_manager' ? [{ label: 'Assigned To', value: assignedTo || 'Unassigned' }] : []),
                   ] : []),
                   ...(selectedClassification === 'Consumable' ? [
                     { label: 'Quantity', value: String(quantity) },
@@ -925,8 +927,8 @@ export default function AddAssetPage() {
                     ...(uploadFile ? [{ label: 'Installer Binary', value: `${uploadFile.name} (${fmtSize(uploadFile.size)})` }] : []),
                   ] : []),
                   { label: 'Location', value: locationName || '—' },
-                  ...(selectedClassification !== 'Software' && subLocationId && subLocationId !== 'none' ? [{ label: 'Department', value: subName }] : []),
-                  ...(selectedClassification !== 'Software' && warehouseId && warehouseId !== 'none' ? [{ label: 'Warehouse', value: whName }] : []),
+                  ...(selectedClassification !== 'Software' && subLocationId && subLocationId !== 'none' && userRole !== 'site_manager' ? [{ label: 'Department', value: subName }] : []),
+                  ...(selectedClassification !== 'Software' && warehouseId && warehouseId !== 'none' && userRole !== 'site_manager' ? [{ label: 'Warehouse', value: whName }] : []),
                   ...(notes ? [{ label: 'Notes', value: notes }] : []),
                 ].map(row => (
                   <div key={row.label} className="flex justify-between items-start px-4 py-2.5 hover:bg-muted/10 text-sm">

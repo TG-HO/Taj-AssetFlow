@@ -49,6 +49,7 @@ export function Sidebar({ userRole }: { userRole?: string }) {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   useEffect(() => {
     async function fetchUnreadCount() {
@@ -156,6 +157,7 @@ export function Sidebar({ userRole }: { userRole?: string }) {
   };
 
   const handleLogout = async () => {
+    setIsLoggingOut(true);
     try {
       localStorage.removeItem('tenant_session');
       localStorage.removeItem('tenant_company');
@@ -325,10 +327,14 @@ export function Sidebar({ userRole }: { userRole?: string }) {
               <div className="border-t border-border/50 my-0.5" />
               <button
                 onClick={handleLogout}
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors text-left font-medium"
+                disabled={isLoggingOut}
+                className={cn(
+                  "w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors text-left font-medium",
+                  isLoggingOut && "blur-[1px] opacity-60 pointer-events-none"
+                )}
               >
                 <LogOut size={15} />
-                <span>Sign Out</span>
+                <span>{isLoggingOut ? 'Signing Out...' : 'Sign Out'}</span>
               </button>
             </div>
           )}
