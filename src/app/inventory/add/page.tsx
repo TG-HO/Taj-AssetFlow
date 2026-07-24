@@ -46,6 +46,7 @@ const STATUS_OPTIONS = [
   { value: 'Faulty', label: 'Faulty' },
   { value: 'Damaged', label: 'Damaged' },
   { value: 'Snatched', label: 'Snatched' },
+  { value: 'Out of Order', label: 'Out of Order' },
 ];
 const CLASSIFICATION_META: Record<Classification, { icon: React.ElementType; color: string; bg: string; desc: string }> = {
   Asset: { icon: Laptop, color: 'text-blue-600', bg: 'bg-blue-50 border-blue-200', desc: 'Physical hardware with serial number tracking (Laptops, Desktops, Servers, Monitors)' },
@@ -55,6 +56,7 @@ const CLASSIFICATION_META: Record<Classification, { icon: React.ElementType; col
 const STEPS = [
   { id: 'classification', title: 'Classification & Type' },
   { id: 'specifications', title: 'Specifications' },
+  { id: 'dates', title: 'Dates' },
   { id: 'location', title: 'Location Assignment' },
   { id: 'review', title: 'Review & Submit' },
 ];
@@ -67,7 +69,9 @@ function selectVal(setter: (v: string) => void) {
 export default function AddAssetPage() {
   const router = useRouter();
   const { companyId, profile } = useTenantSession();
-  const userRole = profile?.role || 'moderator';
+  const rawRole = (profile?.role || '').toLowerCase().trim();
+  const isAdminOrMod = rawRole === 'admin' || rawRole === 'administrator' || rawRole === 'moderator';
+  const isRegionalPerson = !isAdminOrMod;
   const [step, setStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
@@ -77,7 +81,7 @@ export default function AddAssetPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [isCatsLoading, setIsCatsLoading] = useState(true);
   const [selectedCategoryId, setSelectedCategoryId] = useState('');
-  const [selectedClassification, setSelectedClassification] = useState<Classification | null>(null);
+  const [selectedClassification, setSelectedClassification] = useState<Classification | null>('Asset');
   const [itemName, setItemName] = useState('');
   const [statusState, setStatusState] = useState('New');
 
@@ -101,6 +105,10 @@ export default function AddAssetPage() {
   const [softwareVersion, setSoftwareVersion] = useState('');
   const [totalSeats, setTotalSeats] = useState(1);
   const [expiryDate, setExpiryDate] = useState('');
+
+  // Dates
+  const [purchaseDate, setPurchaseDate] = useState('');
+  const [issueDate, setIssueDate] = useState('');
 
   // Shared
   const [notes, setNotes] = useState('');
@@ -127,10 +135,10 @@ export default function AddAssetPage() {
   }, []);
 
   useEffect(() => {
-    if (userRole === 'site_manager') {
+    if (isRegionalPerson) {
       setSelectedClassification('Asset');
     }
-  }, [userRole]);
+  }, [isRegionalPerson]);
 
   const fmtSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
@@ -255,6 +263,9 @@ export default function AddAssetPage() {
     if (step === 1) {
       if (selectedClassification === 'Asset') {
         if (!serialNumber.trim()) { setGlobalError('Serial number is required for Asset items.'); return false; }
+        if (!ram) { setGlobalError('RAM is mandatory for Asset items.'); return false; }
+        if (!storageType) { setGlobalError('Storage Type is mandatory for Asset items.'); return false; }
+        if (!storageCapacity) { setGlobalError('Storage Capacity is mandatory for Asset items.'); return false; }
         setIsCheckingSerial(true);
         const isUnique = await checkNewSerialNumber(serialNumber.trim());
         setIsCheckingSerial(false);
@@ -272,6 +283,17 @@ export default function AddAssetPage() {
       return true;
     }
     if (step === 2) {
+      // Step 2 is Dates
+      if (purchaseDate && issueDate) {
+        if (new Date(issueDate) < new Date(purchaseDate)) {
+          setGlobalError('Issue Date cannot be before Purchase Date.');
+          return false;
+        }
+      }
+      return true;
+    }
+    if (step === 3) {
+      // Step 3 is Location Assignment
       if (!locationId) { setGlobalError('Please select a primary location.'); return false; }
       return true;
     }
@@ -312,6 +334,8 @@ export default function AddAssetPage() {
         subLocationId: (subLocationId && subLocationId !== 'none') ? subLocationId : null,
         warehouseId: (warehouseId && warehouseId !== 'none') ? warehouseId : null,
         status: statusState,
+        purchaseDate: purchaseDate || null,
+        issueDate: issueDate || null,
         details: notes || null,
       });
 
@@ -518,39 +542,40 @@ export default function AddAssetPage() {
             <div className="space-y-5">
               <div className="space-y-2">
                 <Label htmlFor="item-classification">Item Category <span className="text-destructive">*</span></Label>
-                <Select
-                  value={selectedClassification || ''}
-                  onValueChange={(val) => {
-                    if (val) {
-                      const newCls = val as Classification;
-                      setSelectedClassification(newCls);
-                      setSelectedCategoryId('');
-                      setUploadFile(null);
-                      setUploadError('');
-                    }
-                  }}
-                  disabled={userRole === 'site_manager'}
-                  items={userRole === 'site_manager' ? [
-                    { value: 'Asset', label: 'Assets' }
-                  ] : [
-                    { value: 'Asset', label: 'Assets' },
-                    { value: 'Consumable', label: 'Consumables' },
-                    { value: 'Software', label: 'Software' }
-                  ]}
-                >
-                  <SelectTrigger id="item-classification" className="w-full">
-                    <SelectValue placeholder="Select Item Category (Assets, Consumables, Software)..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Asset">Assets</SelectItem>
-                    {userRole !== 'site_manager' && (
-                      <>
-                        <SelectItem value="Consumable">Consumables</SelectItem>
-                        <SelectItem value="Software">Software</SelectItem>
-                      </>
-                    )}
-                  </SelectContent>
-                </Select>
+                {isRegionalPerson ? (
+                  <Input
+                    disabled
+                    value="Assets (Set by default)"
+                    className="w-full bg-muted/30 font-semibold text-primary cursor-not-allowed border-primary/20"
+                  />
+                ) : (
+                  <Select
+                    value={selectedClassification || ''}
+                    onValueChange={(val) => {
+                      if (val) {
+                        const newCls = val as Classification;
+                        setSelectedClassification(newCls);
+                        setSelectedCategoryId('');
+                        setUploadFile(null);
+                        setUploadError('');
+                      }
+                    }}
+                    items={[
+                      { value: 'Asset', label: 'Assets' },
+                      { value: 'Consumable', label: 'Consumables' },
+                      { value: 'Software', label: 'Software' }
+                    ]}
+                  >
+                    <SelectTrigger id="item-classification" className="w-full">
+                      <SelectValue placeholder="Select Item Category (Assets, Consumables, Software)..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Asset">Assets</SelectItem>
+                      <SelectItem value="Consumable">Consumables</SelectItem>
+                      <SelectItem value="Software">Software</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
 
               {selectedClassification && (
@@ -623,7 +648,7 @@ export default function AddAssetPage() {
                   <Select 
                     value={statusState} 
                     onValueChange={selectVal(setStatusState)} 
-                    items={userRole === 'site_manager' ? [
+                    items={isRegionalPerson ? [
                       { value: 'New', label: 'New' },
                       { value: 'Used', label: 'Used' }
                     ] : STATUS_OPTIONS}
@@ -634,7 +659,8 @@ export default function AddAssetPage() {
                     <SelectContent>
                       <SelectItem value="New">New</SelectItem>
                       <SelectItem value="Used">Used</SelectItem>
-                      {userRole !== 'site_manager' && (
+                      <SelectItem value="Out of Order">Out of Order</SelectItem>
+                      {!isRegionalPerson && (
                         <>
                           <SelectItem value="Faulty">Faulty</SelectItem>
                           <SelectItem value="Damaged">Damaged</SelectItem>
@@ -653,48 +679,38 @@ export default function AddAssetPage() {
             <div className="space-y-5">
               {selectedClassification === 'Asset' && (
                 <>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="serial">Serial Number <span className="text-destructive">*</span></Label>
-                      <Input id="serial" placeholder="e.g. SN-DELL-001" value={serialNumber}
-                        onChange={e => { setSerialNumber(e.target.value); setSerialError(''); }}
-                        className={serialError ? 'border-destructive' : ''} />
-                      {serialError && <p className="text-xs text-destructive flex items-center gap-1"><AlertCircle size={12} />{serialError}</p>}
-                      {isCheckingSerial && <p className="text-xs text-muted-foreground">Checking uniqueness...</p>}
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="model">Model Number <span className="text-muted-foreground font-normal">(Optional)</span></Label>
-                      <Input id="model" placeholder="e.g. LAT-5420-I5" value={modelNumber} onChange={e => setModelNumber(e.target.value)} />
-                    </div>
-                  </div>
                   <div className="space-y-2">
-                    <Label htmlFor="part">Part Number <span className="text-muted-foreground font-normal">(Optional)</span></Label>
-                    <Input id="part" placeholder="e.g. PN-12345" value={partNumber} onChange={e => setPartNumber(e.target.value)} />
+                    <Label htmlFor="serial">Serial Number <span className="text-destructive">*</span></Label>
+                    <Input id="serial" placeholder="e.g. SN-DELL-001" value={serialNumber}
+                      onChange={e => { setSerialNumber(e.target.value); setSerialError(''); }}
+                      className={serialError ? 'border-destructive' : ''} />
+                    {serialError && <p className="text-xs text-destructive flex items-center gap-1"><AlertCircle size={12} />{serialError}</p>}
+                    {isCheckingSerial && <p className="text-xs text-muted-foreground">Checking uniqueness...</p>}
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="space-y-2">
-                      <Label>RAM</Label>
+                      <Label>RAM <span className="text-destructive">*</span></Label>
                       <Select value={ram} onValueChange={selectVal(setRam)} items={RAM_OPTIONS.map(r => ({ value: r, label: r }))}>
                         <SelectTrigger><SelectValue placeholder="Select RAM" /></SelectTrigger>
                         <SelectContent>{RAM_OPTIONS.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label>Storage Type</Label>
+                      <Label>Storage Type <span className="text-destructive">*</span></Label>
                       <Select value={storageType} onValueChange={selectVal(setStorageType)} items={STORAGE_TYPES.map(t => ({ value: t, label: t }))}>
                         <SelectTrigger><SelectValue placeholder="Select Type" /></SelectTrigger>
                         <SelectContent>{STORAGE_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label>Storage Capacity</Label>
+                      <Label>Storage Capacity <span className="text-destructive">*</span></Label>
                       <Select value={storageCapacity} onValueChange={selectVal(setStorageCapacity)} items={STORAGE_OPTIONS.map(s => ({ value: s, label: s }))}>
                         <SelectTrigger><SelectValue placeholder="Select Size" /></SelectTrigger>
                         <SelectContent>{STORAGE_OPTIONS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
                       </Select>
                     </div>
                   </div>
-                  {userRole !== 'site_manager' && (
+                  {!isRegionalPerson && (
                     <div className="space-y-2">
                       <Label htmlFor="assigned">Assigned To <span className="text-muted-foreground font-normal">(Optional)</span></Label>
                       <EmployeeSelect
@@ -807,8 +823,38 @@ export default function AddAssetPage() {
             </div>
           )}
 
-          {/* ══ STEP 3: Location Assignment ═════════════════════════ */}
+          {/* ══ STEP 3: Dates (Optional) ════════════════════════════ */}
           {step === 2 && (
+            <div className="space-y-6">
+              <div className="p-4 border border-muted/50 rounded-xl bg-muted/5 space-y-4">
+                <h4 className="text-sm font-semibold text-primary flex items-center gap-2">Dates Information</h4>
+                <p className="text-xs text-muted-foreground">Select lifecycle dates for this item using the date pickers (both fields are optional).</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="purchase-date">Purchase Date <span className="text-muted-foreground font-normal">(Optional)</span></Label>
+                    <Input
+                      id="purchase-date"
+                      type="date"
+                      value={purchaseDate}
+                      onChange={e => setPurchaseDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="issue-date">Issue Date <span className="text-muted-foreground font-normal">(Optional)</span></Label>
+                    <Input
+                      id="issue-date"
+                      type="date"
+                      value={issueDate}
+                      onChange={e => setIssueDate(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ══ STEP 4: Location Assignment ═════════════════════════ */}
+          {step === 3 && (
             <div className="space-y-6">
               <div className="p-4 border border-muted/50 rounded-xl bg-muted/5 space-y-4">
                 <h4 className="text-sm font-semibold text-primary flex items-center gap-2"><MapPin size={15} />Location Hierarchy</h4>
@@ -829,7 +875,7 @@ export default function AddAssetPage() {
                     </Select>
                   )}
                 </div>
-                {locationId && selectedClassification !== 'Software' && userRole !== 'site_manager' && (
+                {locationId && !isRegionalPerson && selectedClassification !== 'Software' && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in duration-300">
                     <div className="space-y-2">
                       <Label>Department / Sub-Location</Label>
@@ -887,8 +933,8 @@ export default function AddAssetPage() {
             </div>
           )}
 
-          {/* ══ STEP 4: Review & Submit ═════════════════════════════ */}
-          {step === 3 && (
+          {/* ══ STEP 5: Review & Submit ═════════════════════════════ */}
+          {step === 4 && (
             <div className="space-y-5">
               <div className="flex items-center gap-2 mb-2"><ClipboardList size={18} className="text-primary" /><h3 className="font-bold text-base">Submission Summary</h3></div>
               {selectedCategory && (
@@ -909,12 +955,12 @@ export default function AddAssetPage() {
                   ...(selectedClassification !== 'Software' ? [{ label: 'Status', value: statusState }] : []),
                   ...(selectedClassification === 'Asset' ? [
                     { label: 'Serial Number', value: serialNumber || '—' },
-                    { label: 'Model Number', value: modelNumber || '—' },
-                    { label: 'Part Number', value: partNumber || '—' },
                     { label: 'RAM', value: ram || '—' },
                     { label: 'Storage', value: [storageType, storageCapacity].filter(Boolean).join(' · ') || '—' },
-                    ...(userRole !== 'site_manager' ? [{ label: 'Assigned To', value: assignedTo || 'Unassigned' }] : []),
+                    ...(!isRegionalPerson ? [{ label: 'Assigned To', value: assignedTo || 'Unassigned' }] : []),
                   ] : []),
+                  { label: 'Purchase Date', value: purchaseDate || 'Not specified' },
+                  { label: 'Issue Date', value: issueDate || 'Not specified' },
                   ...(selectedClassification === 'Consumable' ? [
                     { label: 'Quantity', value: String(quantity) },
                     { label: 'Min Safety Stock', value: String(minSafetyStock) },
@@ -927,8 +973,8 @@ export default function AddAssetPage() {
                     ...(uploadFile ? [{ label: 'Installer Binary', value: `${uploadFile.name} (${fmtSize(uploadFile.size)})` }] : []),
                   ] : []),
                   { label: 'Location', value: locationName || '—' },
-                  ...(selectedClassification !== 'Software' && subLocationId && subLocationId !== 'none' && userRole !== 'site_manager' ? [{ label: 'Department', value: subName }] : []),
-                  ...(selectedClassification !== 'Software' && warehouseId && warehouseId !== 'none' && userRole !== 'site_manager' ? [{ label: 'Warehouse', value: whName }] : []),
+                  ...(selectedClassification !== 'Software' && subLocationId && subLocationId !== 'none' && !isRegionalPerson ? [{ label: 'Department', value: subName }] : []),
+                  ...(selectedClassification !== 'Software' && warehouseId && warehouseId !== 'none' && !isRegionalPerson ? [{ label: 'Warehouse', value: whName }] : []),
                   ...(notes ? [{ label: 'Notes', value: notes }] : []),
                 ].map(row => (
                   <div key={row.label} className="flex justify-between items-start px-4 py-2.5 hover:bg-muted/10 text-sm">

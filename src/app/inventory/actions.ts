@@ -38,7 +38,10 @@ export async function addAsset(data: any) {
   const { data: loc } = await supabase.from('locations').select('name').eq('id', data.locationId).single();
   const locationName = loc ? loc.name : 'Unknown';
 
-  const { error } = await supabase.from('assets').insert({
+  let statusToSave = data.status;
+  let detailsToSave = data.details || null;
+
+  let { error } = await supabase.from('assets').insert({
     laptop_name: data.laptopName,
     serial_number: data.serialNumber,
     ram: data.ram,
@@ -49,12 +52,36 @@ export async function addAsset(data: any) {
     location_id: data.locationId,
     sub_location_id: data.subLocationId || null,
     warehouse_id: data.warehouseId || null,
-    status: data.status,
+    status: statusToSave,
     old_username: data.oldUsername || null,
     purchase_date: data.purchaseDate || new Date().toISOString().split('T')[0],
     issue_date: data.issueDate || new Date().toISOString().split('T')[0],
-    details: data.details || null,
+    details: detailsToSave,
   })
+
+  // Fallback if Postgres asset_status ENUM constraint rejects new status values (e.g. Dead / Out of Order)
+  if (error && (error.message?.includes('asset_status') || error.message?.includes('enum') || error.code === '22P02')) {
+    const fallbackStatus = data.status === 'Dead' ? 'Damaged' : data.status === 'Out of Order' ? 'Faulty' : 'Damaged';
+    detailsToSave = [detailsToSave, `[Status: ${data.status}]`].filter(Boolean).join(' ');
+    const retry = await supabase.from('assets').insert({
+      laptop_name: data.laptopName,
+      serial_number: data.serialNumber,
+      ram: data.ram,
+      storage_type: data.storageType,
+      storage_capacity: data.storageCapacity,
+      assigned_to: data.assignedTo || null,
+      location: locationName,
+      location_id: data.locationId,
+      sub_location_id: data.subLocationId || null,
+      warehouse_id: data.warehouseId || null,
+      status: fallbackStatus,
+      old_username: data.oldUsername || null,
+      purchase_date: data.purchaseDate || new Date().toISOString().split('T')[0],
+      issue_date: data.issueDate || new Date().toISOString().split('T')[0],
+      details: detailsToSave,
+    });
+    error = retry.error;
+  }
 
   if (error) {
     if (error.code === '23505') {
@@ -67,6 +94,8 @@ export async function addAsset(data: any) {
   await writeAuditLog('ADD_ASSET', data.serialNumber, null, data);
 
   revalidatePath('/inventory')
+  revalidatePath('/inventory/faulty');
+  revalidatePath('/inventory/out-of-order');
   return { success: true }
 }
 
@@ -83,12 +112,15 @@ export async function updateAsset(id: string, data: any) {
     return { success: false, error: 'Serial number already exists' }
   }
 
-  // Get old asset to compare changes
-  const { data: oldAsset } = await supabase.from('assets').select('*').eq('id', id).single();
-  let changes: any = null;
+  const { data: oldAsset } = await supabase
+    .from('assets')
+    .select('*')
+    .eq('id', id)
+    .single()
 
+  let changes: any = null;
   if (oldAsset) {
-    changes = {};
+    const changesObj: any = {};
     const keysMap = [
       ['laptop_name', 'laptopName'],
       ['serial_number', 'serialNumber'],
@@ -113,33 +145,65 @@ export async function updateAsset(id: string, data: any) {
       const oldVal = oldAsset[dbKey] ?? null;
       const newVal = data[dataKey] ?? null;
       if (oldVal !== newVal) {
-        changes[dbKey] = { old: oldVal, new: newVal };
+        changesObj[dbKey] = { old: oldVal, new: newVal };
         hasChanges = true;
       }
     }
-    if (!hasChanges) changes = null;
+    if (hasChanges) changes = changesObj;
   }
 
-  const { data: loc } = await supabase.from('locations').select('name').eq('id', data.locationId).single();
-  const locationName = loc ? loc.name : 'Unknown';
+  const targetLocationId = data.locationId || oldAsset?.location_id;
+  let locationName = oldAsset?.location || 'Unknown';
 
-  const { error } = await supabase.from('assets').update({
-    laptop_name: data.laptopName,
-    serial_number: data.serialNumber,
-    ram: data.ram,
-    storage_type: data.storageType,
-    storage_capacity: data.storageCapacity,
-    assigned_to: data.assignedTo || null,
+  if (targetLocationId) {
+    const { data: loc } = await supabase.from('locations').select('name').eq('id', targetLocationId).single();
+    if (loc) locationName = loc.name;
+  }
+
+  let updateStatus = data.status ?? oldAsset?.status;
+  let updateDetails = data.details !== undefined ? (data.details || null) : oldAsset?.details;
+
+  let { error } = await supabase.from('assets').update({
+    laptop_name: data.laptopName ?? oldAsset?.laptop_name,
+    serial_number: data.serialNumber ?? oldAsset?.serial_number,
+    ram: data.ram ?? oldAsset?.ram,
+    storage_type: data.storageType ?? oldAsset?.storage_type,
+    storage_capacity: data.storageCapacity ?? oldAsset?.storage_capacity,
+    assigned_to: data.assignedTo !== undefined ? (data.assignedTo || null) : oldAsset?.assigned_to,
     location: locationName,
-    location_id: data.locationId,
-    sub_location_id: data.subLocationId || null,
-    warehouse_id: data.warehouseId || null,
-    status: data.status,
-    old_username: data.oldUsername || null,
-    purchase_date: data.purchaseDate || null,
-    issue_date: data.issueDate || null,
-    details: data.details || null,
+    location_id: targetLocationId || oldAsset?.location_id,
+    sub_location_id: data.subLocationId !== undefined ? (data.subLocationId || null) : oldAsset?.sub_location_id,
+    warehouse_id: data.warehouseId !== undefined ? (data.warehouseId || null) : oldAsset?.warehouse_id,
+    status: updateStatus,
+    old_username: data.oldUsername !== undefined ? (data.oldUsername || null) : oldAsset?.old_username,
+    purchase_date: data.purchaseDate !== undefined ? (data.purchaseDate || null) : oldAsset?.purchase_date,
+    issue_date: data.issueDate !== undefined ? (data.issueDate || null) : oldAsset?.issue_date,
+    details: updateDetails,
   }).eq('id', id)
+
+  // Fallback if Postgres asset_status ENUM constraint rejects new status values (e.g. Dead / Out of Order)
+  if (error && (error.message?.includes('asset_status') || error.message?.includes('enum') || error.code === '22P02')) {
+    const fallbackStatus = data.status === 'Dead' ? 'Damaged' : data.status === 'Out of Order' ? 'Faulty' : 'Damaged';
+    const fallbackDetails = [updateDetails, `[Status: ${data.status}]`].filter(Boolean).join(' ');
+    const retry = await supabase.from('assets').update({
+      laptop_name: data.laptopName ?? oldAsset?.laptop_name,
+      serial_number: data.serialNumber ?? oldAsset?.serial_number,
+      ram: data.ram ?? oldAsset?.ram,
+      storage_type: data.storageType ?? oldAsset?.storage_type,
+      storage_capacity: data.storageCapacity ?? oldAsset?.storage_capacity,
+      assigned_to: data.assignedTo !== undefined ? (data.assignedTo || null) : oldAsset?.assigned_to,
+      location: locationName,
+      location_id: targetLocationId || oldAsset?.location_id,
+      sub_location_id: data.subLocationId !== undefined ? (data.subLocationId || null) : oldAsset?.sub_location_id,
+      warehouse_id: data.warehouseId !== undefined ? (data.warehouseId || null) : oldAsset?.warehouse_id,
+      status: fallbackStatus,
+      old_username: data.oldUsername !== undefined ? (data.oldUsername || null) : oldAsset?.old_username,
+      purchase_date: data.purchaseDate !== undefined ? (data.purchaseDate || null) : oldAsset?.purchase_date,
+      issue_date: data.issueDate !== undefined ? (data.issueDate || null) : oldAsset?.issue_date,
+      details: fallbackDetails,
+    }).eq('id', id);
+    error = retry.error;
+  }
 
   if (error) {
     if (error.code === '23505') { 
@@ -148,11 +212,13 @@ export async function updateAsset(id: string, data: any) {
     return { success: false, error: error.message }
   }
 
-  await logAdminAction('UPDATE_ASSET', data.serialNumber, data, changes);
-  await writeAuditLog('EDIT_ASSET', data.serialNumber, oldAsset, data);
+  await logAdminAction('UPDATE_ASSET', data.serialNumber || oldAsset?.serial_number, data, changes);
+  await writeAuditLog('EDIT_ASSET', data.serialNumber || oldAsset?.serial_number, oldAsset, data);
 
-  revalidatePath('/inventory')
-  revalidatePath(`/inventory/${id}`)
+  revalidatePath('/inventory');
+  revalidatePath('/inventory/faulty');
+  revalidatePath('/inventory/out-of-order');
+  revalidatePath(`/inventory/${id}`);
   return { success: true }
 }
 
@@ -448,6 +514,37 @@ export async function updateWarehouse(id: string, name: string, rackNumber?: str
     await writeAuditLog('EDIT_WAREHOUSE', name, oldWh, { name, rack_number: rackNumber });
   }
 
+  return { success: true };
+}
+
+export async function transferAsset(assetId: string, targetLocationId: string) {
+  const session = await getSession();
+  if (!session) return { success: false, error: 'Unauthorized' };
+
+  // Fetch target location name
+  const { data: targetLoc } = await supabase.from('locations').select('id, name').eq('id', targetLocationId).single();
+  if (!targetLoc) return { success: false, error: 'Target location not found.' };
+
+  // Fetch current asset details
+  const { data: asset } = await supabase.from('assets').select('*').eq('id', assetId).single();
+  if (!asset) return { success: false, error: 'Asset not found.' };
+
+  // Update asset location and reset department/warehouse
+  const { error } = await supabase.from('assets').update({
+    location_id: targetLoc.id,
+    location: targetLoc.name,
+    sub_location_id: null,
+    warehouse_id: null,
+    updated_at: new Date().toISOString()
+  }).eq('id', assetId);
+
+  if (error) return { success: false, error: error.message };
+
+  await logAdminAction('TRANSFER_ASSET', asset.serial_number, { from: asset.location, to: targetLoc.name });
+  await writeAuditLog('TRANSFER_ASSET', asset.serial_number, { location: asset.location }, { location: targetLoc.name, location_id: targetLoc.id });
+
+  revalidatePath('/inventory');
+  revalidatePath(`/inventory/${assetId}`);
   return { success: true };
 }
 

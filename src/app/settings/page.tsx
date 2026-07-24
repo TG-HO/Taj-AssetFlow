@@ -336,9 +336,9 @@ function SettingsContent() {
 
   useEffect(() => {
     if (activeTab === 'locations') fetchLocationsData();
-    else if (activeTab === 'users' && userRole === 'admin') fetchUsersData();
+    else if (activeTab === 'users') fetchUsersData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, userRole]);
+  }, [activeTab]);
 
   // ── Viewport-aware menu trigger ──────────────────────────────────
   const handleMenuOpen = (e: React.MouseEvent<HTMLButtonElement>, locId: string) => {
@@ -555,14 +555,17 @@ function SettingsContent() {
     notifications: 'Manage alerts, reports, and critical warning preferences.',
     security: 'Review security audits and authentication policies.',
   };
-  const ALL_TABS = userRole === 'site_manager' ? [
+  const isAdmin = userRole === 'admin' || profile?.role === 'admin';
+  const isSiteManager = userRole === 'site_manager' || profile?.role === 'site_manager';
+
+  const ALL_TABS = isSiteManager ? [
     { id: 'appearance', label: 'Appearance', icon: Palette },
   ] : [
     { id: 'locations', label: 'Location Settings', icon: MapPin },
     { id: 'appearance', label: 'Appearance', icon: Palette },
     { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'security', label: 'Security', icon: Shield },
-    ...(userRole === 'admin' ? [{ id: 'users', label: 'User Management', icon: Users }] : []),
+    { id: 'users', label: 'User Management', icon: Users },
   ];
 
   return (
@@ -1049,7 +1052,7 @@ function SettingsContent() {
         {/* ──────────────────────────────────────────────────────── */}
         {/* TAB: USER MANAGEMENT                                    */}
         {/* ──────────────────────────────────────────────────────── */}
-        {activeTab === 'users' && userRole === 'admin' && (
+        {activeTab === 'users' && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             <Card className="md:col-span-1 shadow-sm h-fit border border-muted/50">
               <CardHeader>
@@ -1082,13 +1085,13 @@ function SettingsContent() {
                     <Select value={newUserRole} onValueChange={val => { if (val) setNewUserRole(val); }} items={[
                       { value: 'moderator', label: 'Moderator (Read/Write)' },
                       { value: 'admin', label: 'Admin (Full Access)' },
-                      { value: 'site_manager', label: 'Site Manager (Branch Restricted)' }
+                      { value: 'site_manager', label: 'Regional Person (Branch Restricted)' }
                     ]}>
-                      <SelectTrigger id="role"><SelectValue placeholder="Select role" /></SelectTrigger>
-                      <SelectContent>
+                      <SelectTrigger id="role" className="w-full"><SelectValue placeholder="Select role" /></SelectTrigger>
+                      <SelectContent className="min-w-[240px]">
                         <SelectItem value="moderator">Moderator (Read/Write)</SelectItem>
                         <SelectItem value="admin">Admin (Full Access)</SelectItem>
-                        <SelectItem value="site_manager">Site Manager (Branch Restricted)</SelectItem>
+                        <SelectItem value="site_manager">Regional Person (Branch Restricted)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1168,7 +1171,7 @@ function SettingsContent() {
                           <div className="flex flex-col gap-0.5">
                             <Badge variant={user.role === 'admin' ? 'default' : user.role === 'site_manager' ? 'outline' : 'secondary'} className="w-fit gap-1 font-semibold">
                               {user.role === 'admin' && <Shield className="h-3 w-3" />}
-                              {user.role}
+                              {user.role === 'site_manager' ? 'Regional Person' : user.role === 'admin' ? 'Admin' : 'Moderator'}
                             </Badge>
                             {user.role === 'site_manager' && (
                               <div className="flex flex-wrap gap-1 mt-1.5">
@@ -1460,13 +1463,13 @@ function SettingsContent() {
                 <Select value={editUserRole} onValueChange={val => { if (val) setEditUserRole(val); }} items={[
                   { value: 'moderator', label: 'Moderator (Read/Write)' },
                   { value: 'admin', label: 'Admin (Full Access)' },
-                  { value: 'site_manager', label: 'Site Manager (Branch Restricted)' }
+                  { value: 'site_manager', label: 'Regional Person (Branch Restricted)' }
                 ]}>
-                  <SelectTrigger id="edit-user-role"><SelectValue placeholder="Select role" /></SelectTrigger>
-                  <SelectContent className="z-[99999]">
+                  <SelectTrigger id="edit-user-role" className="w-full"><SelectValue placeholder="Select role" /></SelectTrigger>
+                  <SelectContent className="z-[99999] min-w-[240px]">
                     <SelectItem value="moderator">Moderator (Read/Write)</SelectItem>
                     <SelectItem value="admin">Admin (Full Access)</SelectItem>
-                    <SelectItem value="site_manager">Site Manager (Branch Restricted)</SelectItem>
+                    <SelectItem value="site_manager">Regional Person (Branch Restricted)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

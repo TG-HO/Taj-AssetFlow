@@ -93,8 +93,12 @@ export function Sidebar({ userRole }: { userRole?: string }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleSettingsMouseEnter = () => {
+  const [flyoutTop, setFlyoutTop] = useState(0);
+
+  const handleSettingsMouseEnter = (e: React.MouseEvent) => {
     if (settingsLeaveTimer.current) clearTimeout(settingsLeaveTimer.current);
+    const rect = e.currentTarget.getBoundingClientRect();
+    setFlyoutTop(rect.top);
     setShowSettingsFlyout(true);
   };
 
@@ -174,6 +178,7 @@ export function Sidebar({ userRole }: { userRole?: string }) {
     { name: 'View Inventory', href: '/inventory', icon: List },
     { name: role === 'site_manager' ? 'Available in Stock' : 'Consumables', href: '/inventory/consumables', icon: Package },
     { name: 'Faulty / Damaged', href: '/inventory/faulty', icon: List },
+    { name: 'Out of Order Inventory', href: '/inventory/out-of-order', icon: List },
     { name: 'Add Asset', href: '/inventory/add', icon: PackagePlus },
   ];
 
@@ -197,7 +202,10 @@ export function Sidebar({ userRole }: { userRole?: string }) {
     links.push({ name: 'Admin Logs', href: '/admin-logs', icon: List });
   }
 
-  const profileName = profile?.full_name || profile?.email?.split('@')[0] || '';
+  const profileName = profile?.full_name || (profile?.email ? profile.email.split('@')[0] : '') || 'User';
+  const rawRole = (role || '').toLowerCase().trim();
+  const isAdminOrMod = rawRole === 'admin' || rawRole === 'administrator' || rawRole === 'moderator';
+  const displayRole = isAdminOrMod ? (rawRole.includes('admin') ? 'Admin' : 'Moderator') : 'Regional Person';
 
   return (
     <>
@@ -214,7 +222,7 @@ export function Sidebar({ userRole }: { userRole?: string }) {
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 px-4 py-6 space-y-1">
+        <nav className="flex-1 px-4 py-3 space-y-1 overflow-y-auto overflow-x-hidden min-h-0">
           {links.map((link) => {
             const Icon = link.icon;
             const isActive = link.href === '/'
@@ -226,7 +234,7 @@ export function Sidebar({ userRole }: { userRole?: string }) {
                 key={link.name}
                 href={link.href}
                 className={cn(
-                  'flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors text-sm font-medium',
+                  'flex items-center gap-3 px-3 py-2 rounded-md transition-colors text-sm font-medium',
                   isActive
                     ? 'bg-primary text-primary-foreground shadow-sm'
                     : 'text-muted-foreground hover:bg-primary/10 hover:text-primary'
@@ -243,59 +251,87 @@ export function Sidebar({ userRole }: { userRole?: string }) {
             );
           })}
 
-          {/* Settings nav item with hover flyout */}
+          {/* Settings nav item with fixed hover flyout */}
           <div
             className="relative"
-            onMouseEnter={() => { if (role !== 'site_manager') handleSettingsMouseEnter(); }}
-            onMouseLeave={() => { if (role !== 'site_manager') handleSettingsMouseLeave(); }}
+            onMouseEnter={handleSettingsMouseEnter}
+            onMouseLeave={handleSettingsMouseLeave}
           >
-            <button
-              type="button"
+            <Link
+              href={role === 'site_manager' ? '/settings?tab=appearance' : '/settings'}
               className={cn(
-                'flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors text-sm font-medium w-full',
+                'flex items-center gap-3 px-3 py-2 rounded-md transition-colors text-sm font-medium w-full',
                 pathname.startsWith('/settings')
                   ? 'bg-primary text-primary-foreground shadow-sm'
                   : 'text-muted-foreground hover:bg-primary/10 hover:text-primary'
               )}
-              onClick={() => {
-                if (role === 'site_manager') {
-                  router.push('/settings?tab=appearance');
-                } else {
-                  handleSettingsMouseEnter();
-                }
-              }}
             >
               <Settings size={18} />
               <span>Settings</span>
-            </button>
+            </Link>
 
-            {/* Settings Flyout Submenu */}
-            {showSettingsFlyout && role !== 'site_manager' && (
+            {/* Fixed Floating Settings Submenu */}
+            {showSettingsFlyout && (
               <div
-                className="absolute left-full bottom-0 ml-2 w-52 bg-white border border-border rounded-xl shadow-xl py-2 z-50 animate-in slide-in-from-left-2 fade-in duration-150"
-                onMouseEnter={handleSettingsMouseEnter}
+                className="fixed left-64 ml-2 w-52 bg-white border border-border rounded-xl shadow-2xl py-2 z-[100] animate-in slide-in-from-left-2 fade-in duration-150"
+                style={{ top: Math.max(16, Math.min(flyoutTop, (typeof window !== 'undefined' ? window.innerHeight : 800) - 250)) }}
+                onMouseEnter={() => {
+                  if (settingsLeaveTimer.current) clearTimeout(settingsLeaveTimer.current);
+                  setShowSettingsFlyout(true);
+                }}
                 onMouseLeave={handleSettingsMouseLeave}
               >
-                <p className="px-3 pt-1 pb-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">
+                <p className="px-3 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">
                   Settings
                 </p>
-                {SETTINGS_NAV.map((item) => {
-                  const Icon = item.icon;
-                  return (
+                {role === 'site_manager' ? (
+                  <Link
+                    href="/settings?tab=appearance"
+                    onClick={() => setShowSettingsFlyout(false)}
+                    className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-md mx-1 transition-colors font-medium"
+                    style={{ width: 'calc(100% - 8px)' }}
+                  >
+                    <Palette size={15} />
+                    Appearance
+                  </Link>
+                ) : (
+                  <>
                     <Link
-                      key={item.tab}
-                      href={`/settings?tab=${item.tab}`}
+                      href="/settings?tab=locations"
                       onClick={() => setShowSettingsFlyout(false)}
                       className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-md mx-1 transition-colors font-medium"
                       style={{ width: 'calc(100% - 8px)' }}
                     >
-                      <Icon size={15} />
-                      {item.label}
+                      <MapPin size={15} />
+                      Location Settings
                     </Link>
-                  );
-                })}
-                {userRole === 'admin' && (
-                  <>
+                    <Link
+                      href="/settings?tab=appearance"
+                      onClick={() => setShowSettingsFlyout(false)}
+                      className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-md mx-1 transition-colors font-medium"
+                      style={{ width: 'calc(100% - 8px)' }}
+                    >
+                      <Palette size={15} />
+                      Appearance
+                    </Link>
+                    <Link
+                      href="/settings?tab=notifications"
+                      onClick={() => setShowSettingsFlyout(false)}
+                      className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-md mx-1 transition-colors font-medium"
+                      style={{ width: 'calc(100% - 8px)' }}
+                    >
+                      <Bell size={15} />
+                      Notifications
+                    </Link>
+                    <Link
+                      href="/settings?tab=security"
+                      onClick={() => setShowSettingsFlyout(false)}
+                      className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-md mx-1 transition-colors font-medium"
+                      style={{ width: 'calc(100% - 8px)' }}
+                    >
+                      <Shield size={15} />
+                      Security
+                    </Link>
                     <div className="my-1.5 mx-3 border-t border-border/50" />
                     <Link
                       href="/settings?tab=users"
@@ -313,56 +349,37 @@ export function Sidebar({ userRole }: { userRole?: string }) {
           </div>
         </nav>
 
-        {/* User Profile Card */}
-        <div className="p-4 border-t border-border/50 relative" ref={profileMenuRef}>
-          {showProfileMenu && (
-            <div className="absolute bottom-[4.5rem] left-4 right-4 bg-white border border-border rounded-xl shadow-xl p-1.5 z-50 animate-in slide-in-from-bottom-2 duration-150 flex flex-col gap-0.5">
-              <button
-                onClick={() => { setShowProfileMenu(false); setShowProfileModal(true); }}
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors text-left font-medium"
-              >
-                <User size={15} />
-                <span>Profile Settings</span>
-              </button>
-              <div className="border-t border-border/50 my-0.5" />
-              <button
-                onClick={handleLogout}
-                disabled={isLoggingOut}
-                className={cn(
-                  "w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors text-left font-medium",
-                  isLoggingOut && "blur-[1px] opacity-60 pointer-events-none"
-                )}
-              >
-                <LogOut size={15} />
-                <span>{isLoggingOut ? 'Signing Out...' : 'Sign Out'}</span>
-              </button>
-            </div>
-          )}
-
-          <div
-            onClick={() => setShowProfileMenu(!showProfileMenu)}
-            className="flex items-center justify-between p-2.5 rounded-xl border border-border/50 hover:bg-muted/50 cursor-pointer transition-all duration-200 select-none bg-muted/20"
-          >
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm shrink-0 border border-primary/20">
-                {profileName ? profileName.slice(0, 2).toUpperCase() : 'U'}
-              </div>
-              <div className="flex flex-col min-w-0">
-                <span className="text-sm font-semibold text-foreground truncate">
-                  {profileName || 'Loading...'}
-                </span>
-                <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
-                  {profile?.role || 'Moderator'}
-                </span>
+        {/* User Profile Card & Sign Out */}
+        <div className="p-3 border-t border-border/50 bg-background shrink-0">
+          <div className="flex items-center gap-1.5">
+            <div
+              onClick={() => setShowProfileModal(true)}
+              title="Click for Profile Settings"
+              className="flex-1 flex items-center justify-between p-2 rounded-xl border border-border/50 hover:bg-muted/50 cursor-pointer transition-all duration-200 select-none bg-muted/20 min-w-0"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs shrink-0 border border-primary/20">
+                  {profileName ? profileName.slice(0, 2).toUpperCase() : 'U'}
+                </div>
+                <div className="flex flex-col min-w-0">
+                  <span className="text-xs font-semibold text-foreground truncate">
+                    {profileName || 'User'}
+                  </span>
+                  <span className="text-[9px] text-muted-foreground uppercase tracking-wider font-semibold truncate">
+                    {displayRole}
+                  </span>
+                </div>
               </div>
             </div>
-            <ChevronUp
-              size={15}
-              className={cn(
-                'text-muted-foreground transition-transform duration-200 shrink-0',
-                showProfileMenu ? 'rotate-180' : ''
-              )}
-            />
+            <button
+              onClick={handleLogout}
+              disabled={isLoggingOut}
+              title="Sign Out"
+              className="p-2 rounded-xl border border-border/50 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors shrink-0 flex items-center gap-1.5 px-3"
+            >
+              <LogOut size={16} />
+              <span className="text-xs font-semibold">{isLoggingOut ? '...' : 'Sign Out'}</span>
+            </button>
           </div>
         </div>
       </aside>

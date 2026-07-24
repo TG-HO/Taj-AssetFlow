@@ -18,8 +18,11 @@ import { toast } from '@/components/ui/toast';
 
 export default function StockAllocationsPage() {
   const { profile } = useTenantSession();
-  const userRole = profile?.role || 'moderator';
-  const assignedLocationId = profile?.assigned_location_id;
+  const rawRole = (profile?.role || '').toLowerCase().trim();
+  const isAdminOrMod = rawRole === 'admin' || rawRole === 'administrator' || rawRole === 'moderator';
+  const isRegionalPerson = !isAdminOrMod;
+  const isSiteManager = isRegionalPerson;
+  const assignedLocationId = profile?.assigned_location_id || (profile?.assigned_location_ids && profile.assigned_location_ids.length > 0 ? profile.assigned_location_ids[0] : null);
 
   const [allocations, setAllocations] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
@@ -109,6 +112,10 @@ export default function StockAllocationsPage() {
     }
   };
 
+  const filteredAllocations = isSiteManager && assignedLocationId
+    ? allocations.filter(item => item.target_location_id === assignedLocationId || item.target_locations?.id === assignedLocationId)
+    : allocations;
+
   return (
     <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in duration-300 pb-16">
       <div className="flex justify-between items-center">
@@ -127,8 +134,26 @@ export default function StockAllocationsPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* DISPATCH WIDGET: Only visible to Admins/Moderators */}
-        {userRole !== 'site_manager' ? (
+        {/* WIDGET: Location Binding for Site Manager, Dispatch Stock for Admins */}
+        {isSiteManager ? (
+          <Card className="lg:col-span-1 border border-muted/50 shadow-sm h-fit">
+            <CardHeader className="border-b pb-4 bg-muted/5">
+              <CardTitle className="text-lg">Location Binding</CardTitle>
+              <CardDescription>You are logged in as Site Manager for your assigned location.</CardDescription>
+            </CardHeader>
+            <CardContent className="pt-6 space-y-3 text-sm">
+              <div>
+                <p className="text-xs text-muted-foreground font-semibold uppercase">Assigned Location</p>
+                <p className="font-semibold text-primary mt-0.5">
+                  {locations.find(l => l.id === assignedLocationId)?.name || 'Taj 1'}
+                </p>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                You will only see and reconcile dispatches targeted specifically to your branch.
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
           <Card className="lg:col-span-1 border border-muted/50 shadow-sm h-fit">
             <CardHeader className="border-b pb-4 bg-muted/5">
               <CardTitle className="text-lg">Dispatch Stock</CardTitle>
@@ -176,24 +201,6 @@ export default function StockAllocationsPage() {
               </form>
             </CardContent>
           </Card>
-        ) : (
-          <Card className="lg:col-span-1 border border-muted/50 shadow-sm h-fit">
-            <CardHeader className="border-b pb-4 bg-muted/5">
-              <CardTitle className="text-lg">Location Binding</CardTitle>
-              <CardDescription>You are logged in as Site Manager for your assigned location.</CardDescription>
-            </CardHeader>
-            <CardContent className="pt-6 space-y-3 text-sm">
-              <div>
-                <p className="text-xs text-muted-foreground font-semibold uppercase">Assigned Location</p>
-                <p className="font-semibold text-primary mt-0.5">
-                  {locations.find(l => l.id === assignedLocationId)?.name || 'Loading location...'}
-                </p>
-              </div>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                You will only see and reconcile dispatches targeted specifically to your branch.
-              </p>
-            </CardContent>
-          </Card>
         )}
 
         {/* SHIPMENT QUEUE */}
@@ -208,7 +215,7 @@ export default function StockAllocationsPage() {
                 <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary mb-2" />
                 <span className="text-sm text-muted-foreground">Loading dispatches...</span>
               </div>
-            ) : allocations.length === 0 ? (
+            ) : filteredAllocations.length === 0 ? (
               <div className="p-12 text-center text-muted-foreground">
                 <Truck className="h-12 w-12 mx-auto text-muted/30 mb-2" />
                 <p className="font-semibold text-base">No shipments logged</p>
@@ -226,7 +233,7 @@ export default function StockAllocationsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {allocations.map(item => (
+                  {filteredAllocations.map(item => (
                     <TableRow key={item.id} className="hover:bg-muted/5">
                       <TableCell className="py-4">
                         <div className="font-semibold">{item.item_type}</div>
@@ -264,7 +271,7 @@ export default function StockAllocationsPage() {
                         )}
                       </TableCell>
                       <TableCell className="py-4 text-right">
-                        {item.status === 'Pending' && userRole === 'site_manager' && (
+                        {item.status === 'Pending' && (
                           <div className="flex gap-2 justify-end">
                             <Button size="sm" onClick={() => handleAcceptAndLog(item.id)} disabled={isAcceptingId !== null} className="h-8 gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm">
                               {isAcceptingId === item.id ? <Loader2 size={13} className="animate-spin" /> : 'Accept & Log'}

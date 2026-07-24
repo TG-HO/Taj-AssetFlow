@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Search, FileDown, Eye, Edit, Trash2, ArrowUpDown, Check, ChevronDown } from "lucide-react";
 import { deleteAsset } from '../actions';
 import { cn } from "@/lib/utils";
+import { useTenantSession } from '@/lib/TenantSessionContext';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,6 +24,7 @@ import {
 } from "@/components/ui/alert-dialog";
 
 export default function FaultyInventoryPage() {
+  const { profile } = useTenantSession();
   const [search, setSearch] = useState('');
   const [inventory, setInventory] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -40,7 +42,7 @@ export default function FaultyInventoryPage() {
   useEffect(() => {
     fetchInventory();
     fetchUserRole();
-  }, []);
+  }, [profile]);
 
   const fetchUserRole = async () => {
     const { getCurrentUserRole } = await import('../actions');
@@ -50,33 +52,97 @@ export default function FaultyInventoryPage() {
 
   const fetchInventory = async () => {
     setIsLoading(true);
-    const { data, error } = await supabase
+
+    let assetQuery = supabase
       .from('assets')
       .select(`
         *,
         sub_locations ( name ),
         warehouses ( name )
       `)
-      .in('status', ['Faulty', 'Snatched', 'Damaged'])
       .order('created_at', { ascending: false });
-      
-    if (!error && data) {
-      setInventory(data.map((item: any) => ({
-        id: item.id,
-        laptopName: item.laptop_name,
-        serialNumber: item.serial_number,
-        assignedTo: item.assigned_to || 'Unassigned',
-        location: item.location,
-        locationId: item.location_id,
-        subLocationId: item.sub_location_id,
-        subLocationName: item.sub_locations?.name || null,
-        warehouseId: item.warehouse_id,
-        warehouseName: item.warehouses?.name || null,
-        status: item.status,
-        issueDate: item.issue_date,
-        updatedAt: item.updated_at
-      })));
+
+    let itemQuery = supabase
+      .from('inventory_items')
+      .select(`
+        *,
+        locations ( name ),
+        sub_locations ( name ),
+        warehouses ( name )
+      `)
+      .order('created_at', { ascending: false });
+
+    const role = profile?.role || 'moderator';
+    if (role === 'site_manager' && profile?.assigned_location_ids && profile.assigned_location_ids.length > 0) {
+      assetQuery = assetQuery.in('location_id', profile.assigned_location_ids);
+      itemQuery = itemQuery.in('location_id', profile.assigned_location_ids);
     }
+
+    const [{ data: assetsData }, { data: itemsData }] = await Promise.all([
+      assetQuery,
+      itemQuery
+    ]);
+
+    const combined: any[] = [];
+    const seenKeys = new Set<string>();
+
+    if (assetsData) {
+      assetsData.forEach((item: any) => {
+        const isFaultyOrDead = ['Faulty', 'Snatched', 'Damaged', 'Dead'].includes(item.status) || 
+                               (item.details && (item.details.includes('[Dead]') || item.details.includes('[Status: Dead]')));
+        if (isFaultyOrDead) {
+          const displayStatus = (item.status === 'Dead' || (item.details && (item.details.includes('[Dead]') || item.details.includes('[Status: Dead]')))) ? 'Dead' : item.status;
+          const key = item.serial_number && item.serial_number.trim() ? item.serial_number.trim().toLowerCase() : item.id;
+          seenKeys.add(key);
+          combined.push({
+            id: item.id,
+            laptopName: item.laptop_name,
+            serialNumber: item.serial_number || 'N/A',
+            assignedTo: item.assigned_to || 'Unassigned',
+            location: item.location,
+            locationId: item.location_id,
+            subLocationId: item.sub_location_id,
+            subLocationName: item.sub_locations?.name || null,
+            warehouseId: item.warehouse_id,
+            warehouseName: item.warehouses?.name || null,
+            status: displayStatus,
+            issueDate: item.issue_date,
+            updatedAt: item.updated_at
+          });
+        }
+      });
+    }
+
+    if (itemsData) {
+      itemsData.forEach((item: any) => {
+        const isFaultyOrDead = ['Faulty', 'Snatched', 'Damaged', 'Dead'].includes(item.status_state) || 
+                               (item.notes && (item.notes.includes('[Dead]') || item.notes.includes('[Status: Dead]')));
+        if (isFaultyOrDead) {
+          const key = item.serial_number && item.serial_number.trim() ? item.serial_number.trim().toLowerCase() : item.id;
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            const displayStatus = (item.status_state === 'Dead' || (item.notes && (item.notes.includes('[Dead]') || item.notes.includes('[Status: Dead]')))) ? 'Dead' : item.status_state;
+            combined.push({
+              id: item.id,
+              laptopName: item.name,
+              serialNumber: item.serial_number || 'N/A',
+              assignedTo: item.assigned_to || 'Unassigned',
+              location: item.locations?.name || 'Unknown',
+              locationId: item.location_id,
+              subLocationId: item.sub_location_id,
+              subLocationName: item.sub_locations?.name || null,
+              warehouseId: item.warehouse_id,
+              warehouseName: item.warehouses?.name || null,
+              status: displayStatus,
+              issueDate: item.created_at,
+              updatedAt: item.last_modified_at || item.created_at
+            });
+          }
+        }
+      });
+    }
+
+    setInventory(combined);
     setIsLoading(false);
   };
 
@@ -316,7 +382,8 @@ export default function FaultyInventoryPage() {
                     <SelectItem value="All">All Statuses</SelectItem>
                     <SelectItem value="Faulty">Faulty</SelectItem>
                     <SelectItem value="Snatched">Snatched</SelectItem>
-                    <SelectItem value="Damaged">Damaged (Dead)</SelectItem>
+                    <SelectItem value="Damaged">Damaged</SelectItem>
+                    <SelectItem value="Dead">Dead</SelectItem>
                   </SelectContent>
                 </Select>
               </TableHead>

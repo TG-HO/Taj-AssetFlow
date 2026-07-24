@@ -49,39 +49,14 @@ const formSchema = z.object({
     });
   }
 
-  // Conditional dates check
-  if (isUnassigned) {
-    if (!data.purchaseDate || data.purchaseDate.trim() === '') {
+  // Dates validation (optional, but sequence check if both provided)
+  if (data.purchaseDate && data.issueDate && data.purchaseDate.trim() !== '' && data.issueDate.trim() !== '') {
+    if (new Date(data.issueDate) < new Date(data.purchaseDate)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Purchase date is required for unassigned assets",
-        path: ["purchaseDate"],
-      });
-    }
-  } else {
-    // Assigned to employee
-    if (!data.purchaseDate || data.purchaseDate.trim() === '') {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Purchase date is required",
-        path: ["purchaseDate"],
-      });
-    }
-    if (!data.issueDate || data.issueDate.trim() === '') {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Issue date is required when assigned to an employee",
+        message: "Issue date cannot be before purchase date",
         path: ["issueDate"],
       });
-    }
-    if (data.purchaseDate && data.issueDate && data.purchaseDate.trim() !== '' && data.issueDate.trim() !== '') {
-      if (new Date(data.issueDate) < new Date(data.purchaseDate)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Issue date cannot be before purchase date",
-          path: ["issueDate"],
-        });
-      }
     }
   }
 });
@@ -138,7 +113,6 @@ export default function EditAssetPage({ params }: { params: Promise<{ id: string
   useEffect(() => {
     if (isUnassigned) {
       setValue('subLocationId', null);
-      setValue('issueDate', null);
     }
   }, [isUnassigned, setValue]);
 
@@ -616,19 +590,17 @@ export default function EditAssetPage({ params }: { params: Promise<{ id: string
 
               {/* STEP 4: History & Notes */}
               <div className={currentStep === 3 ? 'block space-y-4' : 'hidden'}>
-                <div className={cn("grid gap-4", isUnassigned ? "grid-cols-1" : "grid-cols-2")}>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="purchaseDate">Purchase Date</Label>
+                    <Label htmlFor="purchaseDate">Purchase Date <span className="text-muted-foreground font-normal">(Optional)</span></Label>
                     <Input id="purchaseDate" type="date" {...register('purchaseDate')} />
                     {errors.purchaseDate && <p className="text-sm text-destructive">{errors.purchaseDate.message}</p>}
                   </div>
-                  {!isUnassigned && (
-                    <div className="space-y-2">
-                      <Label htmlFor="issueDate">Issue Date</Label>
-                      <Input id="issueDate" type="date" {...register('issueDate')} />
-                      {errors.issueDate && <p className="text-sm text-destructive">{errors.issueDate.message}</p>}
-                    </div>
-                  )}
+                  <div className="space-y-2">
+                    <Label htmlFor="issueDate">Issue Date <span className="text-muted-foreground font-normal">(Optional)</span></Label>
+                    <Input id="issueDate" type="date" {...register('issueDate')} />
+                    {errors.issueDate && <p className="text-sm text-destructive">{errors.issueDate.message}</p>}
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="details">Details / Remarks <span className="text-muted-foreground font-normal">(Optional)</span></Label>

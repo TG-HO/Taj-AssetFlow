@@ -195,9 +195,11 @@ export default async function Dashboard() {
             <Link href="/inventory" className={buttonVariants({ variant: "outline", size: "lg", className: "w-full justify-start h-12" })}>
               <ListIcon className="mr-2 h-5 w-5" />View Full Inventory
             </Link>
-            <Link href="/software-vault" className={buttonVariants({ variant: "outline", size: "lg", className: "w-full justify-start h-12" })}>
-              <Package className="mr-2 h-5 w-5" />Software Vault
-            </Link>
+            {role !== 'site_manager' && (
+              <Link href="/software-vault" className={buttonVariants({ variant: "outline", size: "lg", className: "w-full justify-start h-12" })}>
+                <Package className="mr-2 h-5 w-5" />Software Vault
+              </Link>
+            )}
           </CardContent>
         </Card>
       </div>

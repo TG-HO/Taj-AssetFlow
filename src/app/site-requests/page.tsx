@@ -20,6 +20,7 @@ interface RequisitionItem {
   itemType: string;
   quantity: number;
   details: string;
+  specs?: string;
 }
 
 const parseCreatedBy = (str: string) => {
@@ -36,7 +37,11 @@ const parseCreatedBy = (str: string) => {
 
 export default function SiteRequestsPage() {
   const { profile } = useTenantSession();
-  const userRole = profile?.role || 'moderator';
+  const rawRole = (profile?.role || '').toLowerCase().trim();
+  const isAdminOrMod = rawRole === 'admin' || rawRole === 'administrator' || rawRole === 'moderator';
+  const isRegionalPerson = !isAdminOrMod;
+  const isSiteManager = isRegionalPerson;
+  const userRole = isAdminOrMod ? rawRole : 'site_manager';
 
   const [requests, setRequests] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -53,6 +58,7 @@ export default function SiteRequestsPage() {
   const [itemType, setItemType] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [details, setDetails] = useState('');
+  const [specs, setSpecs] = useState('');
   const [builderItems, setBuilderItems] = useState<RequisitionItem[]>([]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -60,6 +66,23 @@ export default function SiteRequestsPage() {
   
   // Print preview state
   const [printRequest, setPrintRequest] = useState<any | null>(null);
+
+  const availableCategories = userRole === 'site_manager'
+    ? presetCategories.filter(c => {
+        const lower = c.name.toLowerCase();
+        return !lower.includes('software') && !lower.includes('license') && !lower.includes('antivirus') && !lower.includes('office') && !lower.includes('os') && !lower.includes('operating system');
+      })
+    : presetCategories;
+
+  const displayRequests = userRole === 'site_manager'
+    ? requests.filter(req => {
+        const assignedIds = [
+          ...(profile?.assigned_location_ids || []),
+          ...(profile?.assigned_location_id ? [profile.assigned_location_id] : [])
+        ];
+        return assignedIds.includes(req.location_id);
+      })
+    : requests;
 
   // Safely parse items field - handles string (old data), array, null, etc.
   const safeParseItems = (items: any): any[] => {
@@ -97,20 +120,23 @@ export default function SiteRequestsPage() {
   useEffect(() => {
     async function loadLocations() {
       const { data } = await supabase.from('locations').select('id, name');
-      if (data) {
+      if (data && data.length > 0) {
         if (userRole === 'site_manager') {
-          const assignedIds = profile?.assigned_location_ids || [];
+          const assignedIds = [
+            ...(profile?.assigned_location_ids || []),
+            ...(profile?.assigned_location_id ? [profile.assigned_location_id] : [])
+          ];
           const filtered = data.filter(loc => assignedIds.includes(loc.id));
-          setUserLocations(filtered);
-          if (filtered.length > 0) {
-            setRequestLocationId(profile?.assigned_location_id || filtered[0].id);
-          }
+          const activeLocations = filtered.length > 0 ? filtered : data;
+          setUserLocations(activeLocations);
+          setRequestLocationId(profile?.assigned_location_id || activeLocations[0].id);
         } else {
           setUserLocations(data);
+          setRequestLocationId(data[0].id);
         }
       }
     }
-    if (profile) loadLocations();
+    loadLocations();
   }, [profile, userRole]);
 
   // Load preset categories
@@ -146,10 +172,11 @@ export default function SiteRequestsPage() {
       return;
     }
 
-    setBuilderItems([...builderItems, { itemType, quantity, details: details.trim() }]);
+    setBuilderItems([...builderItems, { itemType, quantity, details: details.trim(), specs: specs.trim() || undefined }]);
     setItemType('');
     setQuantity(1);
     setDetails('');
+    setSpecs('');
   };
 
   const handleBatchSubmit = async (e: React.FormEvent) => {
@@ -389,12 +416,12 @@ export default function SiteRequestsPage() {
                     <p className="text-xs font-bold text-primary">Add Item to Requisition List</p>
                     <div className="space-y-1.5">
                       <Label htmlFor="item-category">Select Item Type</Label>
-                      <Select value={itemType} onValueChange={setItemType} items={presetCategories.map(c => ({ value: c.name, label: c.name }))}>
+                      <Select value={itemType} onValueChange={setItemType} items={availableCategories.map(c => ({ value: c.name, label: c.name }))}>
                         <SelectTrigger id="item-category">
                           <SelectValue placeholder="Select item type" />
                         </SelectTrigger>
                         <SelectContent className="max-h-56">
-                          {presetCategories.map(cat => (
+                          {availableCategories.map(cat => (
                             <SelectItem key={cat.name} value={cat.name}>{cat.name}</SelectItem>
                           ))}
                         </SelectContent>
@@ -409,6 +436,16 @@ export default function SiteRequestsPage() {
                         min={1}
                         value={quantity}
                         onChange={e => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="specs">Required Specs <span className="text-muted-foreground font-normal">(Optional)</span></Label>
+                      <Input
+                        id="specs"
+                        placeholder="e.g. Core i7, 16GB RAM, 512GB SSD"
+                        value={specs}
+                        onChange={e => setSpecs(e.target.value)}
                       />
                     </div>
 
@@ -440,6 +477,7 @@ export default function SiteRequestsPage() {
                           <div key={idx} className="flex justify-between items-center text-xs border p-2 rounded-lg bg-muted/20">
                             <div className="space-y-0.5">
                               <p className="font-semibold text-foreground">{item.itemType} (Qty: {item.quantity})</p>
+                              {item.specs && <p className="text-[10px] text-primary font-medium">Specs: {item.specs}</p>}
                               {item.details && <p className="text-[10px] text-muted-foreground italic">"{item.details}"</p>}
                             </div>
                             <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:bg-destructive/10" onClick={() => setBuilderItems(builderItems.filter((_, i) => i !== idx))}>
@@ -484,7 +522,7 @@ export default function SiteRequestsPage() {
                 <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary mb-2" />
                 <span className="text-sm text-muted-foreground">Loading requests...</span>
               </div>
-            ) : requests.length === 0 ? (
+            ) : displayRequests.length === 0 ? (
               <div className="p-12 text-center text-muted-foreground">
                 <FileText className="h-12 w-12 mx-auto text-muted/30 mb-2" />
                 <p className="font-semibold text-base">No requests active</p>
@@ -501,7 +539,7 @@ export default function SiteRequestsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {requests.map(req => (
+                  {displayRequests.map(req => (
                     <TableRow key={req.id} className="hover:bg-muted/5 cursor-pointer select-none" onClick={() => toggleRequestExpand(req.id)}>
                       <TableCell className="py-4">
                         <div className="font-semibold flex items-center gap-2">
@@ -530,8 +568,11 @@ export default function SiteRequestsPage() {
                               <div className="space-y-1 bg-muted/10 border p-2.5 rounded-lg text-[11px] max-w-md animate-in slide-in-from-top-1 duration-200" onClick={(e) => e.stopPropagation()}>
                                 <p className="font-semibold text-primary text-[10px] uppercase tracking-wider mb-1">Batch Items:</p>
                                 {req.items.map((item: any, idx: number) => (
-                                  <div key={idx} className="flex justify-between border-b last:border-0 pb-1 last:pb-0 pt-1 first:pt-0">
-                                    <span className="font-medium text-foreground">{item.itemType} (x{item.quantity})</span>
+                                  <div key={idx} className="flex justify-between border-b last:border-0 pb-1 last:pb-0 pt-1 first:pt-0 gap-2">
+                                    <div className="flex flex-col">
+                                      <span className="font-medium text-foreground">{item.itemType} (x{item.quantity})</span>
+                                      {item.specs && <span className="text-[10px] text-primary font-medium">Specs: {item.specs}</span>}
+                                    </div>
                                     <span className="text-muted-foreground italic truncate max-w-xs">{item.details || 'No details'}</span>
                                   </div>
                                 ))}
@@ -574,7 +615,11 @@ export default function SiteRequestsPage() {
                         )}
                       </TableCell>
                       <TableCell className="py-4 text-right space-x-1.5 font-medium" onClick={(e) => e.stopPropagation()}>
-                        {req.status === 'Pending' && userRole !== 'site_manager' ? (
+                        {req.status === 'Pending' && (isSiteManager || userRole === 'site_manager') ? (
+                          <span className="text-xs text-muted-foreground italic flex items-center justify-end gap-1">
+                            <Clock size={12} /> Awaiting Approval
+                          </span>
+                        ) : req.status === 'Pending' ? (
                           <div className="flex justify-end items-center gap-1">
                             <Button
                               size="sm"
@@ -615,11 +660,6 @@ export default function SiteRequestsPage() {
                           </div>
                         ) : (
                           <div className="flex justify-end items-center gap-1.5">
-                            {req.status === 'Pending' ? (
-                              <span className="text-xs text-muted-foreground flex items-center gap-1"><Clock size={12} /> Awaiting Approval</span>
-                            ) : (
-                              <span className="text-xs text-muted-foreground font-semibold">Processed</span>
-                            )}
                             {userRole !== 'site_manager' && (
                               <>
                                 <Button
@@ -710,7 +750,10 @@ export default function SiteRequestsPage() {
                     {printRequest.items && printRequest.items.length > 0 ? (
                       printRequest.items.map((item: any, idx: number) => (
                         <TableRow key={idx}>
-                          <TableCell className="font-semibold">{item.itemType}</TableCell>
+                          <TableCell className="font-semibold">
+                            {item.itemType}
+                            {item.specs && <div className="text-xs font-normal text-primary mt-0.5">Specs: {item.specs}</div>}
+                          </TableCell>
                           <TableCell className="text-center font-mono font-bold">{item.quantity}</TableCell>
                           <TableCell className="italic text-muted-foreground">{item.details || 'None'}</TableCell>
                         </TableRow>

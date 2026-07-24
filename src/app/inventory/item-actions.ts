@@ -100,8 +100,10 @@ export async function addInventoryItem(payload: AddInventoryItemPayload) {
     }
   }
 
-  // Insert item
-  const { data: item, error: itemError } = await supabase
+  let statusToSave = payload.status_state;
+  let notesToSave = payload.notes?.trim() || null;
+
+  let { data: item, error: itemError } = await supabase
     .from('inventory_items')
     .insert({
       company_id: session.company_id,
@@ -113,20 +115,47 @@ export async function addInventoryItem(payload: AddInventoryItemPayload) {
       serial_number: payload.serial_number?.trim() || null,
       part_number: payload.part_number?.trim() || null,
       model_number: payload.model_number?.trim() || null,
-      status_state: payload.status_state,
+      status_state: statusToSave,
       quantity: qty,
       minimum_safety_stock: mss,
       assigned_to: payload.assigned_to?.trim() || null,
-      notes: payload.notes?.trim() || null,
+      notes: notesToSave,
     })
     .select('id')
     .single();
 
-  if (itemError) {
-    if (itemError.code === '23505') {
+  if (itemError && (itemError.message?.includes('status_state') || itemError.message?.includes('check constraint') || itemError.code === '23514')) {
+    const fallbackStatus = payload.status_state === 'Dead' ? 'Damaged' : payload.status_state === 'Out of Order' ? 'Faulty' : 'Faulty';
+    notesToSave = [notesToSave, `[Status: ${payload.status_state}]`].filter(Boolean).join(' ');
+    const retry = await supabase
+      .from('inventory_items')
+      .insert({
+        company_id: session.company_id,
+        category_id: payload.category_id,
+        location_id: payload.location_id,
+        sub_location_id: payload.sub_location_id || null,
+        warehouse_id: payload.warehouse_id || null,
+        name: payload.name.trim(),
+        serial_number: payload.serial_number?.trim() || null,
+        part_number: payload.part_number?.trim() || null,
+        model_number: payload.model_number?.trim() || null,
+        status_state: fallbackStatus,
+        quantity: qty,
+        minimum_safety_stock: mss,
+        assigned_to: payload.assigned_to?.trim() || null,
+        notes: notesToSave,
+      })
+      .select('id')
+      .single();
+    item = retry.data;
+    itemError = retry.error;
+  }
+
+  if (itemError || !item) {
+    if (itemError?.code === '23505') {
       return { success: false, error: 'An item with this Serial Number is already registered for your company.' };
     }
-    return { success: false, error: itemError.message };
+    return { success: false, error: itemError?.message || 'Failed to create item.' };
   }
 
   // Insert specs if any

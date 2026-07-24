@@ -6,7 +6,7 @@ import { getSession } from '@/lib/auth'
 
 export async function getUsers() {
   const session = await getSession();
-  if (session?.role !== 'admin') {
+  if (!session || (session.role !== 'admin' && session.role !== 'moderator')) {
     throw new Error('Unauthorized');
   }
 

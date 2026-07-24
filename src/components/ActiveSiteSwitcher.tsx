@@ -62,7 +62,7 @@ export function ActiveSiteSwitcher({
             <MapPin size={20} className="animate-bounce" />
           </div>
           <div>
-            <CardTitle className="text-base font-bold text-primary">Multi-Site Manager Access</CardTitle>
+            <CardTitle className="text-base font-bold text-primary">Site Selection</CardTitle>
             <CardDescription className="text-xs">Switch your current active site to view its scoped inventory, allocations, and requests.</CardDescription>
           </div>
         </div>

@@ -59,7 +59,50 @@ export async function issueItem(
   if (!recipientName.trim()) return { success: false, error: 'Recipient name is required.' };
   if (!handoverCondition.trim()) return { success: false, error: 'Handover condition is required.' };
 
-  // Fetch current item state
+  // Check assets table first
+  const { data: assetItem } = await supabase
+    .from('assets')
+    .select('id, laptop_name, serial_number, status, assigned_to')
+    .eq('id', itemId)
+    .single();
+
+  if (assetItem) {
+    const blockedStatuses = ['Faulty', 'Damaged', 'Snatched', 'Dead', 'Out of Order'];
+    if (blockedStatuses.includes(assetItem.status)) {
+      return {
+        success: false,
+        error: `Cannot issue an item with status "${assetItem.status}". Resolve the condition first.`,
+      };
+    }
+
+    await supabase.from('custody_ledger').insert({
+      company_id: session.company_id,
+      item_id: itemId,
+      action_type: 'ISSUANCE',
+      recipient_name: recipientName.trim(),
+      recipient_department_id: departmentId || null,
+      handover_condition: handoverCondition.trim(),
+      admin_id: session.id,
+    });
+
+    const { error: updateErr } = await supabase
+      .from('assets')
+      .update({
+        status: 'Used',
+        assigned_to: recipientName.trim(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', itemId);
+
+    if (updateErr) return { success: false, error: updateErr.message };
+
+    await writeAuditLog('ISSUE_ITEM', assetItem.serial_number || assetItem.laptop_name, { status: assetItem.status }, { status: 'Used', assigned_to: recipientName });
+    revalidatePath('/inventory');
+    revalidatePath('/');
+    return { success: true };
+  }
+
+  // Fallback to inventory_items table
   const { data: item, error: fetchErr } = await supabase
     .from('inventory_items')
     .select('id, name, serial_number, status_state')
@@ -68,8 +111,7 @@ export async function issueItem(
 
   if (fetchErr || !item) return { success: false, error: 'Item not found.' };
 
-  // Prevent issuance of faulty/damaged/snatched items
-  const blockedStatuses = ['Faulty', 'Damaged', 'Snatched'];
+  const blockedStatuses = ['Faulty', 'Damaged', 'Snatched', 'Dead', 'Out of Order'];
   if (blockedStatuses.includes(item.status_state)) {
     return {
       success: false,
@@ -77,7 +119,6 @@ export async function issueItem(
     };
   }
 
-  // Insert ledger entry
   const { error: ledgerErr } = await supabase.from('custody_ledger').insert({
     company_id: session.company_id,
     item_id: itemId,
@@ -90,7 +131,6 @@ export async function issueItem(
 
   if (ledgerErr) return { success: false, error: ledgerErr.message };
 
-  // Update item status to Used
   const { error: updateErr } = await supabase
     .from('inventory_items')
     .update({ status_state: 'Used', assigned_to: recipientName.trim(), last_modified_at: new Date().toISOString() })
@@ -110,7 +150,7 @@ export async function returnItem(
   itemId: string,
   recipientName: string,
   handoverCondition: string,
-  newStatus: 'New' | 'Used' | 'Faulty' | 'Damaged' | 'Snatched',
+  newStatus: 'New' | 'Used' | 'Faulty' | 'Damaged' | 'Snatched' | 'Dead' | 'Out of Order',
   actionType: 'RETURN' | 'FAULT_DEPOSIT' | 'SNATCH_REPORT' | 'DISPOSAL'
 ) {
   const session = await getSession();
@@ -119,6 +159,62 @@ export async function returnItem(
   if (!recipientName.trim()) return { success: false, error: 'Recipient name is required.' };
   if (!handoverCondition.trim()) return { success: false, error: 'Condition description is required.' };
 
+  // Check assets table first
+  const { data: assetItem } = await supabase
+    .from('assets')
+    .select('id, laptop_name, serial_number, status, assigned_to')
+    .eq('id', itemId)
+    .single();
+
+  if (assetItem) {
+    await supabase.from('custody_ledger').insert({
+      company_id: session.company_id,
+      item_id: itemId,
+      action_type: actionType,
+      recipient_name: recipientName.trim(),
+      recipient_department_id: null,
+      handover_condition: handoverCondition.trim(),
+      admin_id: session.id,
+    });
+
+    const oldUser = assetItem.assigned_to && assetItem.assigned_to.toLowerCase() !== 'unassigned' ? assetItem.assigned_to : null;
+
+    const updateData: any = {
+      status: newStatus,
+      assigned_to: null,
+      updated_at: new Date().toISOString()
+    };
+
+    if (oldUser) {
+      updateData.old_username = oldUser;
+    }
+
+    let { error: updateErr } = await supabase
+      .from('assets')
+      .update(updateData)
+      .eq('id', itemId);
+
+    if (updateErr && (updateErr.message?.includes('asset_status') || updateErr.message?.includes('enum') || updateErr.code === '22P02')) {
+      const fallbackStatus = newStatus === 'Dead' ? 'Damaged' : newStatus === 'Out of Order' ? 'Faulty' : 'Damaged';
+      updateData.status = fallbackStatus;
+      const retry = await supabase
+        .from('assets')
+        .update(updateData)
+        .eq('id', itemId);
+      updateErr = retry.error;
+    }
+
+    if (updateErr) return { success: false, error: updateErr.message };
+
+    await writeAuditLog('RETURN_ITEM', assetItem.serial_number || assetItem.laptop_name, { status: assetItem.status }, { status: newStatus });
+    revalidatePath('/inventory');
+    revalidatePath('/inventory/faulty');
+    revalidatePath('/inventory/out-of-order');
+    revalidatePath('/');
+    return { success: true };
+  }
+
+  // Fallback to inventory_items table
   const { data: item, error: fetchErr } = await supabase
     .from('inventory_items')
     .select('id, name, serial_number, status_state')
@@ -139,12 +235,21 @@ export async function returnItem(
 
   if (ledgerErr) return { success: false, error: ledgerErr.message };
 
-  const { error: updateErr } = await supabase
+  let { error: itemUpdateErr } = await supabase
     .from('inventory_items')
     .update({ status_state: newStatus, assigned_to: null, last_modified_at: new Date().toISOString() })
     .eq('id', itemId);
 
-  if (updateErr) return { success: false, error: updateErr.message };
+  if (itemUpdateErr && (itemUpdateErr.message?.includes('status_state') || itemUpdateErr.message?.includes('check constraint') || itemUpdateErr.code === '23514')) {
+    const fallbackStatus = newStatus === 'Dead' ? 'Damaged' : newStatus === 'Out of Order' ? 'Faulty' : 'Faulty';
+    const retry = await supabase
+      .from('inventory_items')
+      .update({ status_state: fallbackStatus, assigned_to: null, last_modified_at: new Date().toISOString() })
+      .eq('id', itemId);
+    itemUpdateErr = retry.error;
+  }
+
+  if (itemUpdateErr) return { success: false, error: itemUpdateErr.message };
 
   await writeAuditLog('RETURN_ITEM', item.serial_number || item.name, { status_state: item.status_state }, { status_state: newStatus });
 

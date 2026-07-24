@@ -168,3 +168,21 @@ WHERE assigned_location_id IS NOT NULL AND (assigned_location_ids IS NULL OR car
 
 -- Alter site_requests table to add items JSONB column if it doesn't already exist
 ALTER TABLE public.site_requests ADD COLUMN IF NOT EXISTS items JSONB DEFAULT '[]'::jsonb;
+
+-- 9. Upgrade asset_status ENUM and inventory_items status_state CHECK constraint
+DO $$
+BEGIN
+  -- Add values to asset_status ENUM
+  BEGIN
+    ALTER TYPE public.asset_status ADD VALUE IF NOT EXISTS 'Dead';
+  EXCEPTION WHEN OTHERS THEN NULL;
+  END;
+  BEGIN
+    ALTER TYPE public.asset_status ADD VALUE IF NOT EXISTS 'Out of Order';
+  EXCEPTION WHEN OTHERS THEN NULL;
+  END;
+END $$;
+
+ALTER TABLE public.inventory_items DROP CONSTRAINT IF EXISTS inventory_items_status_state_check;
+ALTER TABLE public.inventory_items ADD CONSTRAINT inventory_items_status_state_check CHECK (status_state IN ('New', 'Refub', 'Used', 'Faulty', 'Damaged', 'Dead', 'Out of Order', 'Snatched'));
+

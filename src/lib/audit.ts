@@ -24,7 +24,8 @@ export type AuditAction =
   | 'REVOKE_SEAT'
   | 'UPLOAD_INSTALLER'
   | 'DELETE_INSTALLER'
-  | 'IMPORT_ASSETS';
+  | 'IMPORT_ASSETS'
+  | 'TRANSFER_ASSET';
 
 export async function writeAuditLog(
   actionType: AuditAction,

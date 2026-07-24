@@ -16,9 +16,11 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Search, Plus, FileUp, FileDown, Eye, Edit, Trash2, ArrowUpDown, Check, ChevronDown, ArrowRightLeft, RotateCcw, AlertCircle, Loader2 } from "lucide-react";
-import { deleteAsset } from './actions';
+import { Search, Plus, FileUp, FileDown, Eye, Edit, Trash2, ArrowUpDown, Check, ChevronDown, ArrowRightLeft, RotateCcw, AlertCircle, Loader2, Truck } from "lucide-react";
+import { deleteAsset, transferAsset } from './actions';
 import { cn } from "@/lib/utils";
+import { useTenantSession } from '@/lib/TenantSessionContext';
+import { EmployeeSelect } from "@/components/ui/employee-select";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,6 +33,7 @@ import {
 } from "@/components/ui/alert-dialog";
 
 export default function InventoryPage() {
+  const { profile } = useTenantSession();
   const [search, setSearch] = useState('');
   const [inventory, setInventory] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -43,6 +46,13 @@ export default function InventoryPage() {
   const [durationSort, setDurationSort] = useState('None');
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Transfer modal
+  const [transferItem, setTransferItem] = useState<any | null>(null);
+  const [transferTargetLocId, setTransferTargetLocId] = useState('');
+  const [locationsList, setLocationsList] = useState<any[]>([]);
+  const [isTransferring, setIsTransferring] = useState(false);
+  const [transferError, setTransferError] = useState('');
 
   // Custody modals
   const [checkoutItem, setCheckoutItem] = useState<any | null>(null);
@@ -60,6 +70,7 @@ export default function InventoryPage() {
   useEffect(() => {
     fetchInventory();
     fetchUserRole();
+    supabase.from('locations').select('id, name').order('name').then(({ data }) => setLocationsList(data || []));
   }, []);
 
   const fetchUserRole = async () => {
@@ -570,44 +581,61 @@ export default function InventoryPage() {
                   <TableCell>
                     <span className="text-xs text-muted-foreground whitespace-nowrap">{new Date(item.updatedAt).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                   </TableCell>
-                  <TableCell className="text-right flex justify-end gap-1 overflow-hidden">
-                    <Link href={`/inventory/${item.id}`} className={buttonVariants({ variant: "ghost", size: "icon" })}>
-                      <Eye className="h-4 w-4" />
-                      <span className="sr-only">View</span>
-                    </Link>
-                    <Link href={`/inventory/${item.id}/edit`} className={buttonVariants({ variant: "ghost", size: "icon" })}>
-                      <Edit className="h-4 w-4" />
-                      <span className="sr-only">Edit</span>
-                    </Link>
-                    {/* Checkout button */}
-                    {userRole !== 'site_manager' && (
+                  <TableCell className="text-right min-w-[180px] whitespace-nowrap">
+                    <div className="flex items-center justify-end gap-1">
+                      <Link href={`/inventory/${item.id}`} className={buttonVariants({ variant: "ghost", size: "icon" })}>
+                        <Eye className="h-4 w-4" />
+                        <span className="sr-only">View</span>
+                      </Link>
+                      <Link href={`/inventory/${item.id}/edit`} className={buttonVariants({ variant: "ghost", size: "icon" })}>
+                        <Edit className="h-4 w-4" />
+                        <span className="sr-only">Edit</span>
+                      </Link>
+                      {(() => {
+                        const isAssigned = item.status === 'Used' || (item.assignedTo && item.assignedTo.trim() !== '' && item.assignedTo.toLowerCase() !== 'unassigned');
+                        const isBlocked = ['Faulty', 'Damaged', 'Snatched', 'Dead', 'Out of Order'].includes(item.status);
+                        return (
+                          <>
+                            {!isAssigned && userRole !== 'site_manager' && (
+                              <button
+                                type="button"
+                                title={isBlocked ? `Cannot issue — status is ${item.status}` : 'Issue / Checkout'}
+                                disabled={isBlocked}
+                                onClick={() => { setCheckoutItem(item); setCustodyRecipient(''); setCustodyCondition(''); setCustodyDeptId(''); setCustodyError(''); }}
+                                className={cn('p-1.5 rounded-md transition-colors', isBlocked ? 'opacity-30 cursor-not-allowed' : 'text-blue-600 hover:bg-blue-50')}
+                              >
+                                <ArrowRightLeft className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                            {isAssigned && userRole !== 'site_manager' && (
+                              <button
+                                type="button"
+                                title="Return / Check-In"
+                                onClick={() => { setCheckinItem(item); setCustodyRecipient(''); setCustodyCondition(''); setCustodyStatus('New'); setCustodyAction('RETURN'); setCustodyError(''); }}
+                                className="p-1.5 rounded-md text-green-600 hover:bg-green-50 transition-colors"
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </>
+                        );
+                      })()}
+                      {/* Transfer Button */}
                       <button
                         type="button"
-                        title={['Faulty','Damaged','Snatched'].includes(item.status) ? `Cannot issue — status is ${item.status}` : 'Issue / Checkout'}
-                        disabled={['Faulty','Damaged','Snatched'].includes(item.status)}
-                        onClick={() => { setCheckoutItem(item); setCustodyRecipient(''); setCustodyCondition(''); setCustodyDeptId(''); setCustodyError(''); }}
-                        className={cn('p-1.5 rounded-md transition-colors', ['Faulty','Damaged','Snatched'].includes(item.status) ? 'opacity-30 cursor-not-allowed' : 'text-blue-600 hover:bg-blue-50')}
+                        title="Transfer Asset"
+                        onClick={() => { setTransferItem(item); setTransferTargetLocId(''); setTransferError(''); }}
+                        className="p-1.5 rounded-md text-amber-600 hover:bg-amber-50 transition-colors"
                       >
-                        <ArrowRightLeft className="h-3.5 w-3.5" />
+                        <Truck className="h-3.5 w-3.5" />
                       </button>
-                    )}
-                    {/* Check-In button */}
-                    {userRole !== 'site_manager' && item.status === 'Used' && (
-                      <button
-                        type="button"
-                        title="Return / Check-In"
-                        onClick={() => { setCheckinItem(item); setCustodyRecipient(''); setCustodyCondition(''); setCustodyStatus('New'); setCustodyAction('RETURN'); setCustodyError(''); }}
-                        className="p-1.5 rounded-md text-green-600 hover:bg-green-50 transition-colors"
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                    {userRole === 'admin' && (
-                      <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleDelete(item.id)}>
-                        <Trash2 className="h-4 w-4" />
-                        <span className="sr-only">Delete</span>
-                      </Button>
-                    )}
+                      {userRole === 'admin' && (
+                        <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleDelete(item.id)}>
+                          <Trash2 className="h-4 w-4" />
+                          <span className="sr-only">Delete</span>
+                        </Button>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))
@@ -628,8 +656,11 @@ export default function InventoryPage() {
           </div>
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <Label htmlFor="co-recipient">Recipient Name <span className="text-destructive">*</span></Label>
-              <Input id="co-recipient" placeholder="Full name of recipient" value={custodyRecipient} onChange={e => setCustodyRecipient(e.target.value)} />
+              <Label htmlFor="co-recipient">Recipient Employee <span className="text-destructive">*</span></Label>
+              <EmployeeSelect
+                value={custodyRecipient}
+                onChange={(val) => setCustodyRecipient(val || '')}
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="co-condition">Condition at Handover <span className="text-destructive">*</span></Label>
@@ -675,10 +706,18 @@ export default function InventoryPage() {
             <div className="space-y-1.5">
               <Label>New Status After Return</Label>
               <div className="grid grid-cols-2 gap-2">
-                {[{v:'New',l:'Available'},{v:'Used',l:'Used'},{v:'Faulty',l:'Faulty'},{v:'Damaged',l:'Damaged'},{v:'Snatched',l:'Snatched'}].map(opt => (
+                {[
+                  {v:'New',l:'Available'},
+                  {v:'Used',l:'Used'},
+                  {v:'Faulty',l:'Faulty'},
+                  {v:'Damaged',l:'Damaged'},
+                  {v:'Dead',l:'Dead'},
+                  {v:'Out of Order',l:'Out of Order'},
+                  {v:'Snatched',l:'Snatched'}
+                ].map(opt => (
                   <button key={opt.v} type="button" onClick={() => {
                     setCustodyStatus(opt.v);
-                    setCustodyAction(opt.v === 'Faulty' ? 'FAULT_DEPOSIT' : opt.v === 'Snatched' ? 'SNATCH_REPORT' : 'RETURN');
+                    setCustodyAction(opt.v === 'Faulty' || opt.v === 'Damaged' || opt.v === 'Dead' ? 'FAULT_DEPOSIT' : opt.v === 'Snatched' ? 'SNATCH_REPORT' : 'RETURN');
                   }} className={cn('text-xs px-3 py-2 rounded-lg border transition-all font-medium', custodyStatus === opt.v ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted border-muted')}>{opt.l}</button>
                 ))}
               </div>
@@ -697,6 +736,72 @@ export default function InventoryPage() {
               else setCustodyError(r.error || 'Failed.');
             }}>
               {isCustodyLoading ? <><Loader2 size={14} className="animate-spin mr-2" />Saving...</> : <><RotateCcw size={14} className="mr-2" />Confirm Return</>}
+            </Button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ── Transfer Asset Modal ──────────────────────────────────── */}
+    {transferItem && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div className="bg-background border border-muted/50 rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4 animate-in zoom-in-95 duration-200">
+          <div>
+            <h3 className="text-lg font-bold flex items-center gap-2"><Truck className="h-5 w-5 text-amber-600" />Transfer Asset Location</h3>
+            <p className="text-sm text-muted-foreground mt-0.5">Transferring <strong>{transferItem.laptopName}</strong> ({transferItem.serialNumber})</p>
+          </div>
+          <div className="space-y-3">
+            <div className="p-3 bg-muted/40 border border-muted/50 rounded-lg text-xs space-y-1">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Current Location:</span>
+                <span className="font-bold">{transferItem.location}</span>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="tr-target">Target Location <span className="text-destructive">*</span></Label>
+              <Select value={transferTargetLocId} onValueChange={setTransferTargetLocId}>
+                <SelectTrigger id="tr-target">
+                  <SelectValue placeholder="Select target location..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {locationsList
+                    .filter(loc => loc.id !== transferItem.locationId && loc.name !== transferItem.location)
+                    .filter(loc => {
+                      if (userRole === 'site_manager') {
+                        const assignedIds = [
+                          ...(profile?.assigned_location_ids || []),
+                          ...(profile?.assigned_location_id ? [profile.assigned_location_id] : [])
+                        ];
+                        const isHo = loc.name.toLowerCase().includes('head office') || loc.name.toLowerCase().includes('ho');
+                        if (assignedIds.length > 0) {
+                          return assignedIds.includes(loc.id) || isHo;
+                        }
+                        return true;
+                      }
+                      return true;
+                    })
+                    .map(loc => (
+                      <SelectItem key={loc.id} value={loc.id}>{loc.name}</SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                {userRole === 'site_manager' ? 'You can transfer back to HO or another branch assigned to you.' : 'Select the destination site location.'}
+              </p>
+            </div>
+          </div>
+          {transferError && <div className="flex items-center gap-2 text-xs text-destructive bg-destructive/10 border border-destructive/20 px-3 py-2 rounded-lg"><AlertCircle size={13} />{transferError}</div>}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="outline" onClick={() => setTransferItem(null)} disabled={isTransferring}>Cancel</Button>
+            <Button disabled={isTransferring || !transferTargetLocId} onClick={async () => {
+              if (!transferTargetLocId) { setTransferError('Please select a target location.'); return; }
+              setIsTransferring(true); setTransferError('');
+              const r = await transferAsset(transferItem.id, transferTargetLocId);
+              setIsTransferring(false);
+              if (r.success) { setTransferItem(null); fetchInventory(); }
+              else setTransferError(r.error || 'Transfer failed.');
+            }}>
+              {isTransferring ? <><Loader2 size={14} className="animate-spin mr-2" />Transferring...</> : <><Truck size={14} className="mr-2" />Confirm Transfer</>}
             </Button>
           </div>
         </div>

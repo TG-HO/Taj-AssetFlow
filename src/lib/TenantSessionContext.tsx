@@ -121,16 +121,14 @@ export function TenantSessionProvider({ children }: { children: React.ReactNode 
               needsUpdate = true;
             }
 
-            if (needsUpdate) {
-              localStorage.setItem('tenant_session', JSON.stringify(prof));
-              if (comp) localStorage.setItem('tenant_company', JSON.stringify(comp));
-              setProfile(prof as Profile);
-              if (comp) setCompany(comp as Company);
+            localStorage.setItem('tenant_session', JSON.stringify(prof));
+            if (comp) localStorage.setItem('tenant_company', JSON.stringify(comp));
+            setProfile(prof as Profile);
+            if (comp) setCompany(comp as Company);
 
-              // Dynamically call server action to update cookied session token
-              const { syncSessionCookie } = await import('@/app/users/actions');
-              await syncSessionCookie();
-            }
+            // Dynamically call server action to update cookied session token
+            const { syncSessionCookie } = await import('@/app/users/actions');
+            await syncSessionCookie();
           } else if (profError && !storedProfile) {
             router.push('/login/setup-error');
           }
