@@ -19,7 +19,9 @@ import {
   Bell,
   Shield,
   Code2,
-  Package
+  Package,
+  Menu,
+  X
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
@@ -31,6 +33,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogC
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
+import { ActiveSiteSwitcher } from '@/components/ActiveSiteSwitcher';
 
 const SETTINGS_NAV = [
   { label: 'Location Settings', tab: 'locations', icon: MapPin },
@@ -44,12 +47,18 @@ export function Sidebar({ userRole }: { userRole?: string }) {
   const router = useRouter();
   const { profile, company, isLoading } = useTenantSession();
 
+  const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showSettingsFlyout, setShowSettingsFlyout] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  // Close mobile drawer when route changes
+  useEffect(() => {
+    setIsMobileOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     async function fetchUnreadCount() {
@@ -209,16 +218,78 @@ export function Sidebar({ userRole }: { userRole?: string }) {
 
   return (
     <>
-      <aside className="w-64 h-screen bg-white border-r border-border flex flex-col fixed left-0 top-0 z-40 shadow-sm">
-        {/* Logo */}
-        <div className="p-6 flex items-center gap-3 border-b border-border/50">
-          <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center text-primary-foreground shadow-md">
-            <Laptop size={24} />
+      {/* Mobile Top Navbar (Visible on screens < 1024px) */}
+      <header className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-white/95 backdrop-blur-md border-b border-border z-30 px-4 flex items-center justify-between shadow-xs">
+        <div className="flex items-center gap-2.5">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setIsMobileOpen(true)}
+            className="h-10 w-10 text-foreground hover:bg-primary/10 hover:text-primary rounded-lg"
+            aria-label="Open navigation menu"
+          >
+            <Menu size={22} />
+          </Button>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground shadow-xs">
+              <Laptop size={18} />
+            </div>
+            <div>
+              <h1 className="font-bold text-sm tracking-tight text-primary leading-tight">Taj AssetFlow</h1>
+              <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">IT Inventory</p>
+            </div>
           </div>
-          <div>
-            <h1 className="font-bold text-xl tracking-tight text-primary">Taj AssetFlow</h1>
-            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">IT Inventory</p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {unreadCount > 0 && (
+            <Link
+              href="/notifications"
+              className="relative p-2 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+            >
+              <Bell size={18} />
+              <span className="absolute top-1 right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-bold text-destructive-foreground animate-pulse">
+                {unreadCount}
+              </span>
+            </Link>
+          )}
+        </div>
+      </header>
+
+      {/* Mobile Backdrop Overlay */}
+      {isMobileOpen && (
+        <div
+          onClick={() => setIsMobileOpen(false)}
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 lg:hidden transition-opacity duration-300"
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Sidebar Aside (Fixed on Desktop, Slide-over Drawer on Mobile) */}
+      <aside
+        className={cn(
+          "w-64 h-screen bg-white border-r border-border flex flex-col fixed left-0 top-0 z-50 shadow-xl lg:shadow-none transition-transform duration-300 ease-in-out",
+          isMobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+        )}
+      >
+        {/* Logo & Mobile Close Button */}
+        <div className="p-5 sm:p-6 flex items-center justify-between border-b border-border/50">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center text-primary-foreground shadow-md">
+              <Laptop size={24} />
+            </div>
+            <div>
+              <h1 className="font-bold text-xl tracking-tight text-primary">Taj AssetFlow</h1>
+              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">IT Inventory</p>
+            </div>
           </div>
+          <button
+            onClick={() => setIsMobileOpen(false)}
+            className="lg:hidden p-1.5 text-muted-foreground hover:text-foreground rounded-lg hover:bg-muted/50 transition-colors"
+            aria-label="Close navigation menu"
+          >
+            <X size={20} />
+          </button>
         </div>
 
         {/* Nav */}
@@ -233,6 +304,7 @@ export function Sidebar({ userRole }: { userRole?: string }) {
               <Link
                 key={link.name}
                 href={link.href}
+                onClick={() => setIsMobileOpen(false)}
                 className={cn(
                   'flex items-center gap-3 px-3 py-2 rounded-md transition-colors text-sm font-medium',
                   isActive
@@ -259,6 +331,7 @@ export function Sidebar({ userRole }: { userRole?: string }) {
           >
             <Link
               href={role === 'site_manager' ? '/settings?tab=appearance' : '/settings'}
+              onClick={() => setIsMobileOpen(false)}
               className={cn(
                 'flex items-center gap-3 px-3 py-2 rounded-md transition-colors text-sm font-medium w-full',
                 pathname.startsWith('/settings')
@@ -287,7 +360,7 @@ export function Sidebar({ userRole }: { userRole?: string }) {
                 {role === 'site_manager' ? (
                   <Link
                     href="/settings?tab=appearance"
-                    onClick={() => setShowSettingsFlyout(false)}
+                    onClick={() => { setShowSettingsFlyout(false); setIsMobileOpen(false); }}
                     className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-md mx-1 transition-colors font-medium"
                     style={{ width: 'calc(100% - 8px)' }}
                   >
@@ -298,7 +371,7 @@ export function Sidebar({ userRole }: { userRole?: string }) {
                   <>
                     <Link
                       href="/settings?tab=locations"
-                      onClick={() => setShowSettingsFlyout(false)}
+                      onClick={() => { setShowSettingsFlyout(false); setIsMobileOpen(false); }}
                       className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-md mx-1 transition-colors font-medium"
                       style={{ width: 'calc(100% - 8px)' }}
                     >
@@ -307,7 +380,7 @@ export function Sidebar({ userRole }: { userRole?: string }) {
                     </Link>
                     <Link
                       href="/settings?tab=appearance"
-                      onClick={() => setShowSettingsFlyout(false)}
+                      onClick={() => { setShowSettingsFlyout(false); setIsMobileOpen(false); }}
                       className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-md mx-1 transition-colors font-medium"
                       style={{ width: 'calc(100% - 8px)' }}
                     >
@@ -316,7 +389,7 @@ export function Sidebar({ userRole }: { userRole?: string }) {
                     </Link>
                     <Link
                       href="/settings?tab=notifications"
-                      onClick={() => setShowSettingsFlyout(false)}
+                      onClick={() => { setShowSettingsFlyout(false); setIsMobileOpen(false); }}
                       className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-md mx-1 transition-colors font-medium"
                       style={{ width: 'calc(100% - 8px)' }}
                     >
@@ -325,7 +398,7 @@ export function Sidebar({ userRole }: { userRole?: string }) {
                     </Link>
                     <Link
                       href="/settings?tab=security"
-                      onClick={() => setShowSettingsFlyout(false)}
+                      onClick={() => { setShowSettingsFlyout(false); setIsMobileOpen(false); }}
                       className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-md mx-1 transition-colors font-medium"
                       style={{ width: 'calc(100% - 8px)' }}
                     >
@@ -335,7 +408,7 @@ export function Sidebar({ userRole }: { userRole?: string }) {
                     <div className="my-1.5 mx-3 border-t border-border/50" />
                     <Link
                       href="/settings?tab=users"
-                      onClick={() => setShowSettingsFlyout(false)}
+                      onClick={() => { setShowSettingsFlyout(false); setIsMobileOpen(false); }}
                       className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-md mx-1 transition-colors font-medium"
                       style={{ width: 'calc(100% - 8px)' }}
                     >
@@ -353,7 +426,7 @@ export function Sidebar({ userRole }: { userRole?: string }) {
         <div className="p-3 border-t border-border/50 bg-background shrink-0">
           <div className="flex items-center gap-1.5">
             <div
-              onClick={() => setShowProfileModal(true)}
+              onClick={() => { setShowProfileModal(true); setIsMobileOpen(false); }}
               title="Click for Profile Settings"
               className="flex-1 flex items-center justify-between p-2 rounded-xl border border-border/50 hover:bg-muted/50 cursor-pointer transition-all duration-200 select-none bg-muted/20 min-w-0"
             >

@@ -250,92 +250,103 @@ export default function ConsumablesPage() {
       </div>
 
       <div className="rounded-xl border bg-card w-full overflow-hidden shadow-sm">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-muted/10">
-              <TableHead className="font-semibold text-foreground py-3">Item Name</TableHead>
-              <TableHead className="font-semibold text-foreground py-3">Category</TableHead>
-              <TableHead className="font-semibold text-foreground py-3">Primary Location</TableHead>
-              <TableHead className="font-semibold text-foreground py-3">Location Details</TableHead>
-              <TableHead className="font-semibold text-foreground py-3 font-mono">Available Stock</TableHead>
-              {userRole !== 'site_manager' && <TableHead className="font-semibold text-foreground py-3">Safety Threshold</TableHead>}
-              {userRole !== 'site_manager' && <TableHead className="font-semibold text-foreground py-3 text-right">Actions</TableHead>}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
-              <TableRow>
-                <TableCell colSpan={userRole === 'site_manager' ? 5 : 7} className="text-center py-16 text-muted-foreground">
-                  <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary mb-2" />
-                  <span>{userRole === 'site_manager' ? 'Loading available stock...' : 'Loading consumables stock...'}</span>
-                </TableCell>
+        <div className="overflow-x-auto w-full">
+          <Table className="min-w-[750px]">
+            <TableHeader>
+              <TableRow className="bg-muted/10">
+                <TableHead className="font-semibold text-foreground py-3">Item Name</TableHead>
+                <TableHead className="font-semibold text-foreground py-3">Category</TableHead>
+                <TableHead className="font-semibold text-foreground py-3">Description</TableHead>
+                <TableHead className="font-semibold text-foreground py-3">Primary Location</TableHead>
+                <TableHead className="font-semibold text-foreground py-3">Location Details</TableHead>
+                <TableHead className="font-semibold text-foreground py-3 font-mono">Available Stock</TableHead>
+                {userRole !== 'site_manager' && <TableHead className="font-semibold text-foreground py-3">Safety Threshold</TableHead>}
+                {userRole !== 'site_manager' && <TableHead className="font-semibold text-foreground py-3 text-right">Actions</TableHead>}
               </TableRow>
-            ) : filteredItems.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={userRole === 'site_manager' ? 5 : 7} className="text-center py-16 text-muted-foreground">
-                  <Package className="h-12 w-12 mx-auto text-muted/40 mb-3" />
-                  <p className="font-semibold text-base">
-                    {userRole === 'site_manager' ? 'No Available Stock Found' : 'No Consumables Found'}
-                  </p>
-                  <p className="text-sm mt-1">
-                    {userRole === 'site_manager' ? 'Available items will show up here.' : 'Add items using the intake form.'}
-                  </p>
-                </TableCell>
-              </TableRow>
-            ) : (
-              filteredItems.map((item) => {
-                const isOutOfStock = item.quantity === 0;
-                const isLowStock = !isOutOfStock && item.quantity <= item.minimum_safety_stock;
-                
-                return (
-                  <TableRow key={item.id} className="hover:bg-muted/5 transition-colors">
-                    <TableCell className="font-bold py-4">
-                      <div className="flex flex-col">
+            </TableHeader>
+            <TableBody>
+              {isLoading ? (
+                <TableRow>
+                  <TableCell colSpan={userRole === 'site_manager' ? 6 : 8} className="text-center py-16 text-muted-foreground">
+                    <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary mb-2" />
+                    <span>{userRole === 'site_manager' ? 'Loading available stock...' : 'Loading consumables stock...'}</span>
+                  </TableCell>
+                </TableRow>
+              ) : filteredItems.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={userRole === 'site_manager' ? 6 : 8} className="text-center py-16 text-muted-foreground">
+                    <Package className="h-12 w-12 mx-auto text-muted/40 mb-3" />
+                    <p className="font-semibold text-base">
+                      {userRole === 'site_manager' ? 'No Available Stock Found' : 'No Consumables Found'}
+                    </p>
+                    <p className="text-sm mt-1">
+                      {userRole === 'site_manager' ? 'Available items will show up here.' : 'Add items using the intake form.'}
+                    </p>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                filteredItems.map((item) => {
+                  const isOutOfStock = item.quantity === 0;
+                  const isLowStock = !isOutOfStock && item.quantity <= item.minimum_safety_stock;
+                  
+                  return (
+                    <TableRow key={item.id} className="hover:bg-muted/5 transition-colors">
+                      <TableCell className="font-bold py-4">
                         <span>{item.name}</span>
-                        {item.notes && <span className="text-[10px] font-normal text-muted-foreground truncate max-w-[200px]" title={item.notes}>{item.notes}</span>}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-sm py-4">{item.item_categories?.name || '—'}</TableCell>
-                    <TableCell className="text-sm font-semibold py-4">{item.locations?.name || '—'}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground py-4">
-                      {item.sub_locations?.name || item.warehouses?.name ? (
-                        <div className="flex flex-col gap-0.5">
-                          {item.sub_locations?.name && <span>Dept: {item.sub_locations.name}</span>}
-                          {item.warehouses?.name && <span>Warehouse: {item.warehouses.name}</span>}
-                        </div>
-                      ) : '—'}
-                    </TableCell>
-                    <TableCell className="py-4">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono font-bold text-sm">{item.quantity}</span>
-                        {isOutOfStock ? (
-                          <Badge variant="destructive" className="text-[10px] px-1.5 py-0">Out of Stock</Badge>
-                        ) : isLowStock ? (
-                          <Badge className="bg-amber-100 text-amber-800 border-none text-[10px] px-1.5 py-0">Low Stock</Badge>
+                      </TableCell>
+                      <TableCell className="text-sm py-4">
+                        <Badge variant="outline" className="font-normal bg-muted/40">
+                          {item.item_categories?.name || '—'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground py-4 max-w-[220px]">
+                        {item.notes ? (
+                          <span className="line-clamp-2" title={item.notes}>{item.notes}</span>
                         ) : (
-                          <Badge className="bg-green-100 text-green-800 border-none text-[10px] px-1.5 py-0">Healthy</Badge>
-                        )}
-                      </div>
-                    </TableCell>
-                    {userRole !== 'site_manager' && <TableCell className="text-sm font-mono text-muted-foreground py-4">{item.minimum_safety_stock}</TableCell>}
-                    {userRole !== 'site_manager' && (
-                      <TableCell className="text-right py-4 space-x-1">
-                        <Button variant="ghost" size="icon" onClick={() => openEditModal(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50">
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        {userRole === 'admin' && (
-                          <Button variant="ghost" size="icon" onClick={() => setDeletingItem(item)} className="h-8 w-8 text-destructive hover:bg-destructive/10">
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          <span className="text-muted-foreground/50 italic">—</span>
                         )}
                       </TableCell>
-                    )}
-                  </TableRow>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
+                      <TableCell className="text-sm font-semibold py-4">{item.locations?.name || '—'}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground py-4">
+                        {item.sub_locations?.name || item.warehouses?.name ? (
+                          <div className="flex flex-col gap-0.5">
+                            {item.sub_locations?.name && <span>Dept: {item.sub_locations.name}</span>}
+                            {item.warehouses?.name && <span>Warehouse: {item.warehouses.name}</span>}
+                          </div>
+                        ) : '—'}
+                      </TableCell>
+                      <TableCell className="py-4">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-sm">{item.quantity}</span>
+                          {isOutOfStock ? (
+                            <Badge variant="destructive" className="text-[10px] px-1.5 py-0">Out of Stock</Badge>
+                          ) : isLowStock ? (
+                            <Badge className="bg-amber-100 text-amber-800 border-none text-[10px] px-1.5 py-0">Low Stock</Badge>
+                          ) : (
+                            <Badge className="bg-green-100 text-green-800 border-none text-[10px] px-1.5 py-0">Healthy</Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      {userRole !== 'site_manager' && <TableCell className="text-sm font-mono text-muted-foreground py-4">{item.minimum_safety_stock}</TableCell>}
+                      {userRole !== 'site_manager' && (
+                        <TableCell className="text-right py-4 space-x-1">
+                          <Button variant="ghost" size="icon" onClick={() => openEditModal(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50">
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          {userRole === 'admin' && (
+                            <Button variant="ghost" size="icon" onClick={() => setDeletingItem(item)} className="h-8 w-8 text-destructive hover:bg-destructive/10">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </div>
 
       {/* ── Edit Consumable Modal ─────────────────────────────────────── */}

@@ -21,18 +21,18 @@ import { useTenantSession } from '@/lib/TenantSessionContext';
 
 const formSchema = z.object({
   // Step 1
-  laptopName: z.string().min(2, 'Laptop name is required'),
-  serialNumber: z.string().min(5, 'Serial number is required'),
-  ram: z.string().min(1, 'RAM is required'),
+  laptopName: z.string().min(2, 'Asset name is required'),
+  serialNumber: z.string().min(3, 'Serial number is required'),
+  ram: z.string().optional().nullable(),
   // Step 2
-  storageType: z.enum(['SSD', 'HDD']),
-  storageCapacity: z.string().min(1, 'Storage capacity is required'),
+  storageType: z.string().optional().nullable(),
+  storageCapacity: z.string().optional().nullable(),
   // Step 3
   assignedTo: z.string().optional().nullable(),
   locationId: z.string().uuid('Location is required'),
   subLocationId: z.string().optional().nullable(),
   warehouseId: z.string().optional().nullable(),
-  status: z.enum(['New', 'Refub', 'Used', 'Faulty', 'Snatched', 'Damaged']),
+  status: z.enum(['New', 'Refurbished', 'Refub', 'Used', 'Faulty', 'Snatched', 'Damaged', 'Dead', 'Out of Order']),
   oldUsername: z.string().optional().nullable(),
   // Step 4
   purchaseDate: z.string().optional().nullable(),
@@ -433,12 +433,14 @@ export default function EditAssetPage({ params }: { params: Promise<{ id: string
                       value={watch('status') || ''}
                       items={userRole === 'site_manager' ? [
                         { value: 'New', label: 'New' },
-                        { value: 'Refub', label: 'Refurbished' },
-                        { value: 'Used', label: 'Used' }
+                        { value: 'Refurbished', label: 'Refurbished' },
+                        { value: 'Used', label: 'Used' },
+                        { value: 'Out of Order', label: 'Out of Order' }
                       ] : [
                         { value: 'New', label: 'New' },
-                        { value: 'Refub', label: 'Refurbished' },
+                        { value: 'Refurbished', label: 'Refurbished' },
                         { value: 'Used', label: 'Used' },
+                        { value: 'Out of Order', label: 'Out of Order' },
                         { value: 'Faulty', label: 'Faulty' },
                         { value: 'Snatched', label: 'Snatched' },
                         { value: 'Damaged', label: 'Damaged (Dead)' }
@@ -449,8 +451,9 @@ export default function EditAssetPage({ params }: { params: Promise<{ id: string
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="New">New</SelectItem>
-                        <SelectItem value="Refub">Refurbished</SelectItem>
+                        <SelectItem value="Refurbished">Refurbished</SelectItem>
                         <SelectItem value="Used">Used</SelectItem>
+                        <SelectItem value="Out of Order">Out of Order</SelectItem>
                         {userRole !== 'site_manager' && (
                           <>
                             <SelectItem value="Faulty">Faulty</SelectItem>

@@ -12,6 +12,7 @@ import { supabase } from '@/lib/supabase';
 import { useTenantSession } from '@/lib/TenantSessionContext';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -106,15 +107,19 @@ export default function AssetPassportPage({ params }: { params: Promise<{ id: st
               <Badge variant={
                 ['Faulty', 'Damaged', 'Dead', 'Snatched'].includes(asset.status) ? 'destructive' : 
                 asset.status === 'New' ? 'default' : 
+                asset.status === 'Refurbished' || asset.status === 'Refub' ? 'outline' :
                 'secondary'
-              } className="text-sm px-3 py-1">
+              } className={cn(
+                "text-sm px-3 py-1",
+                (asset.status === 'Refurbished' || asset.status === 'Refub') && "bg-cyan-50 text-cyan-800 border-cyan-300 font-semibold"
+              )}>
                 {asset.status}
               </Badge>
             </div>
             <p className="text-muted-foreground mt-1 text-sm font-mono">{asset.serialNumber}</p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" className="gap-2 text-amber-700 border-amber-300 hover:bg-amber-50" onClick={() => { setTargetLocId(''); setTransferError(''); setIsTransferOpen(true); }}>
             <Truck className="h-4 w-4" />
             Transfer Location
@@ -134,16 +139,16 @@ export default function AssetPassportPage({ params }: { params: Promise<{ id: st
 
       {/* Quick Actions */}
       <div className="flex flex-wrap gap-2 mt-2">
-        {['New', 'Used', 'Refub'].includes(asset.status) ? (
+        {['New', 'Used', 'Refub', 'Refurbished'].includes(asset.status) ? (
           <>
             <Button variant="outline" size="sm" className="text-destructive border-destructive/30 hover:bg-destructive/10" onClick={() => handleStatusUpdate('Faulty')}>Mark as Faulty</Button>
             <Button variant="outline" size="sm" className="text-destructive border-destructive/30 hover:bg-destructive/10" onClick={() => handleStatusUpdate('Damaged')}>Mark as Damaged</Button>
             <Button variant="outline" size="sm" className="text-destructive border-destructive/30 hover:bg-destructive/10" onClick={() => handleStatusUpdate('Dead')}>Mark as Dead</Button>
             <Button variant="outline" size="sm" className="text-destructive border-destructive/30 hover:bg-destructive/10" onClick={() => handleStatusUpdate('Snatched')}>Mark as Snatched</Button>
           </>
-        ) : ['Faulty', 'Damaged', 'Dead', 'Snatched'].includes(asset.status) ? (
+        ) : ['Faulty', 'Damaged', 'Dead', 'Snatched', 'Out of Order'].includes(asset.status) ? (
           <>
-            <Button variant="outline" size="sm" className="text-emerald-600 border-emerald-600/30 hover:bg-emerald-50" onClick={() => handleStatusUpdate('Refub')}>Mark as Repaired (Refub)</Button>
+            <Button variant="outline" size="sm" className="text-cyan-700 border-cyan-300 hover:bg-cyan-50" onClick={() => handleStatusUpdate('Refurbished')}>Mark as Refurbished</Button>
             <Button variant="outline" size="sm" className="text-emerald-600 border-emerald-600/30 hover:bg-emerald-50" onClick={() => handleStatusUpdate('Used')}>Mark as Recovered (Used)</Button>
           </>
         ) : null}

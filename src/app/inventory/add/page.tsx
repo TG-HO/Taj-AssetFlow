@@ -26,6 +26,7 @@ import {
   Upload,
   FileArchive
 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { EmployeeSelect } from "@/components/ui/employee-select";
 import { supabase } from '@/lib/supabase';
 import { getCategories, checkNewSerialNumber, addInventoryItem } from '../item-actions';
@@ -42,6 +43,7 @@ const STORAGE_OPTIONS = ['128GB', '256GB', '512GB', '1TB', '2TB', '4TB', '8TB'];
 const STORAGE_TYPES = ['SSD', 'HDD', 'NVMe SSD', 'eMMC'];
 const STATUS_OPTIONS = [
   { value: 'New', label: 'New' },
+  { value: 'Refurbished', label: 'Refurbished' },
   { value: 'Used', label: 'Used' },
   { value: 'Faulty', label: 'Faulty' },
   { value: 'Damaged', label: 'Damaged' },
@@ -95,6 +97,11 @@ export default function AddAssetPage() {
   const [assignedTo, setAssignedTo] = useState('');
   const [serialError, setSerialError] = useState('');
   const [isCheckingSerial, setIsCheckingSerial] = useState(false);
+
+  // Desktop Bundled Accessories
+  const [bundleMouse, setBundleMouse] = useState(false);
+  const [bundleKeyboard, setBundleKeyboard] = useState(false);
+  const [bundleMonitor, setBundleMonitor] = useState(false);
 
   // Step 2 — Consumable
   const [quantity, setQuantity] = useState(1);
@@ -251,6 +258,12 @@ export default function AddAssetPage() {
     loadNested();
   }, [locationId]);
 
+  const SIMPLIFIED_NAMES = ['pts card', 'rack', 'nvr', 'switch', 'pdu', 'network device'];
+  const selCatName = (categories.find(c => c.id === selectedCategoryId)?.name || '').toLowerCase();
+  const isSimplifiedItem = selectedClassification === 'Consumable' || 
+    SIMPLIFIED_NAMES.some(s => selCatName.includes(s)) ||
+    SIMPLIFIED_NAMES.some(s => itemName.toLowerCase().includes(s));
+
   // Validation per step
   const validateStep = async (): Promise<boolean> => {
     setGlobalError(null);
@@ -261,20 +274,23 @@ export default function AddAssetPage() {
       return true;
     }
     if (step === 1) {
+      if (isSimplifiedItem) {
+        if (quantity < 0) { setGlobalError('Quantity cannot be negative.'); return false; }
+        return true;
+      }
       if (selectedClassification === 'Asset') {
         if (!serialNumber.trim()) { setGlobalError('Serial number is required for Asset items.'); return false; }
-        if (!ram) { setGlobalError('RAM is mandatory for Asset items.'); return false; }
-        if (!storageType) { setGlobalError('Storage Type is mandatory for Asset items.'); return false; }
-        if (!storageCapacity) { setGlobalError('Storage Capacity is mandatory for Asset items.'); return false; }
+        const isComputingDevice = selCatName.includes('laptop') || selCatName.includes('desktop') || selCatName.includes('server');
+        if (isComputingDevice) {
+          if (!ram) { setGlobalError('RAM is mandatory for Laptop/Desktop/Server assets.'); return false; }
+          if (!storageType) { setGlobalError('Storage Type is mandatory for Laptop/Desktop/Server assets.'); return false; }
+          if (!storageCapacity) { setGlobalError('Storage Capacity is mandatory for Laptop/Desktop/Server assets.'); return false; }
+        }
         setIsCheckingSerial(true);
         const isUnique = await checkNewSerialNumber(serialNumber.trim());
         setIsCheckingSerial(false);
         if (!isUnique) { setSerialError('An asset with this Serial Number is already registered.'); return false; }
         setSerialError('');
-      }
-      if (selectedClassification === 'Consumable') {
-        if (quantity < 0) { setGlobalError('Quantity cannot be negative.'); return false; }
-        if (minSafetyStock < 0) { setGlobalError('Minimum Safety Stock cannot be negative.'); return false; }
       }
       if (selectedClassification === 'Software') {
         if (totalSeats < 1) { setGlobalError('Total seats must be at least 1.'); return false; }
@@ -310,11 +326,20 @@ export default function AddAssetPage() {
   const handleSubmit = async () => {
     setIsSubmitting(true);
     setGlobalError(null);
+
+    const selCatName = (categories.find(c => c.id === selectedCategoryId)?.name || '').toLowerCase();
+    const isDesktop = selCatName.includes('desktop') || itemName.toLowerCase().includes('desktop');
+
     const specs: Array<{ key: string; value: string }> = [];
     if (selectedClassification === 'Asset') {
       if (ram) specs.push({ key: 'RAM', value: ram });
       if (storageType) specs.push({ key: 'Storage_Type', value: storageType });
       if (storageCapacity) specs.push({ key: 'Storage_Capacity', value: storageCapacity });
+      if (isDesktop) {
+        if (bundleMouse) specs.push({ key: 'Bundled_Mouse', value: 'Yes' });
+        if (bundleKeyboard) specs.push({ key: 'Bundled_Keyboard', value: 'Yes' });
+        if (bundleMonitor) specs.push({ key: 'Bundled_Monitor', value: 'Yes' });
+      }
     }
     if (selectedClassification === 'Software') {
       if (licenseKey) specs.push({ key: 'License_Key', value: licenseKey });
@@ -322,13 +347,23 @@ export default function AddAssetPage() {
       if (expiryDate) specs.push({ key: 'Expiry_Date', value: expiryDate });
       specs.push({ key: 'Total_Seats', value: String(totalSeats) });
     }
+
+    const bundledItems = isDesktop ? [
+      bundleMouse && 'Mouse',
+      bundleKeyboard && 'Keyboard',
+      bundleMonitor && 'Monitor'
+    ].filter(Boolean) : [];
+    const bundledStr = bundledItems.length > 0 ? `Bundled: ${bundledItems.join(', ')}` : '';
+    const finalAssetDetails = [notes.trim(), bundledStr].filter(Boolean).join(' | ') || null;
+
     if (selectedClassification === 'Asset') {
+      const finalSerial = serialNumber.trim() || `SN-${itemName.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase()}-${Date.now().toString().slice(-4)}`;
       const assetResult = await addAsset({
         laptopName: itemName.trim(),
-        serialNumber: serialNumber.trim(),
-        ram: ram || 'Unknown',
-        storageType: storageType || 'SSD',
-        storageCapacity: storageCapacity || 'Unknown',
+        serialNumber: finalSerial,
+        ram: ram || 'Standard',
+        storageType: storageType || 'Standard',
+        storageCapacity: storageCapacity || 'Standard',
         assignedTo: assignedTo || null,
         locationId: locationId,
         subLocationId: (subLocationId && subLocationId !== 'none') ? subLocationId : null,
@@ -336,7 +371,7 @@ export default function AddAssetPage() {
         status: statusState,
         purchaseDate: purchaseDate || null,
         issueDate: issueDate || null,
-        details: notes || null,
+        details: finalAssetDetails,
       });
 
       if (!assetResult.success) {
@@ -358,9 +393,8 @@ export default function AddAssetPage() {
       notes: notes || undefined,
       serial_number: selectedClassification === 'Asset' ? serialNumber : undefined,
       part_number: selectedClassification === 'Asset' ? partNumber : undefined,
-      model_number: selectedClassification === 'Asset' ? modelNumber : undefined,
-      quantity: selectedClassification === 'Consumable' ? quantity : selectedClassification === 'Software' ? totalSeats : 1,
-      minimum_safety_stock: selectedClassification === 'Consumable' ? minSafetyStock : 0,
+      quantity: isSimplifiedItem ? quantity : selectedClassification === 'Software' ? totalSeats : 1,
+      minimum_safety_stock: isSimplifiedItem ? minSafetyStock : 0,
       specs,
     });
 
@@ -650,7 +684,9 @@ export default function AddAssetPage() {
                     onValueChange={selectVal(setStatusState)} 
                     items={isRegionalPerson ? [
                       { value: 'New', label: 'New' },
-                      { value: 'Used', label: 'Used' }
+                      { value: 'Refurbished', label: 'Refurbished' },
+                      { value: 'Used', label: 'Used' },
+                      { value: 'Out of Order', label: 'Out of Order' }
                     ] : STATUS_OPTIONS}
                   >
                     <SelectTrigger id="status">
@@ -658,6 +694,7 @@ export default function AddAssetPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="New">New</SelectItem>
+                      <SelectItem value="Refurbished">Refurbished</SelectItem>
                       <SelectItem value="Used">Used</SelectItem>
                       <SelectItem value="Out of Order">Out of Order</SelectItem>
                       {!isRegionalPerson && (
@@ -677,7 +714,32 @@ export default function AddAssetPage() {
           {/* ══ STEP 2: Specifications (dynamic) ═══════════════════ */}
           {step === 1 && (
             <div className="space-y-5">
-              {selectedClassification === 'Asset' && (
+              {isSimplifiedItem ? (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="qty">Quantity <span className="text-destructive">*</span></Label>
+                    <Input id="qty" type="number" min={1} value={quantity} onChange={e => setQuantity(Math.max(1, parseInt(e.target.value) || 1))} />
+                    <p className="text-xs text-muted-foreground">Number of units to register / stock.</p>
+                  </div>
+
+                  {/* Description Box */}
+                  <div className="space-y-2 pt-2">
+                    <Label htmlFor="item-description">Item Description / Specifications <span className="text-muted-foreground font-normal">(Optional)</span></Label>
+                    <textarea
+                      id="item-description"
+                      className="flex min-h-[120px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      placeholder="Add detailed description of item (e.g. Model, technical specifications, port count, connector type)..."
+                      value={notes}
+                      onChange={e => setNotes(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="bg-muted/40 border border-muted/50 p-3 rounded-xl flex items-start gap-2.5 text-xs text-muted-foreground">
+                    <Info size={14} className="shrink-0 mt-0.5 text-primary" />
+                    <div><p className="font-semibold text-foreground mb-0.5">Simplified Hardware Specification</p>Individual serial number tracking is not required for this item type. Only quantity, description, dates, and location are recorded.</div>
+                  </div>
+                </>
+              ) : selectedClassification === 'Asset' ? (
                 <>
                   <div className="space-y-2">
                     <Label htmlFor="serial">Serial Number <span className="text-destructive">*</span></Label>
@@ -689,27 +751,53 @@ export default function AddAssetPage() {
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="space-y-2">
-                      <Label>RAM <span className="text-destructive">*</span></Label>
+                      <Label>RAM <span className="text-muted-foreground font-normal text-xs">(Req for PC/Server)</span></Label>
                       <Select value={ram} onValueChange={selectVal(setRam)} items={RAM_OPTIONS.map(r => ({ value: r, label: r }))}>
                         <SelectTrigger><SelectValue placeholder="Select RAM" /></SelectTrigger>
                         <SelectContent>{RAM_OPTIONS.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label>Storage Type <span className="text-destructive">*</span></Label>
+                      <Label>Storage Type <span className="text-muted-foreground font-normal text-xs">(Req for PC/Server)</span></Label>
                       <Select value={storageType} onValueChange={selectVal(setStorageType)} items={STORAGE_TYPES.map(t => ({ value: t, label: t }))}>
                         <SelectTrigger><SelectValue placeholder="Select Type" /></SelectTrigger>
                         <SelectContent>{STORAGE_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label>Storage Capacity <span className="text-destructive">*</span></Label>
+                      <Label>Storage Capacity <span className="text-muted-foreground font-normal text-xs">(Req for PC/Server)</span></Label>
                       <Select value={storageCapacity} onValueChange={selectVal(setStorageCapacity)} items={STORAGE_OPTIONS.map(s => ({ value: s, label: s }))}>
                         <SelectTrigger><SelectValue placeholder="Select Size" /></SelectTrigger>
                         <SelectContent>{STORAGE_OPTIONS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
                       </Select>
                     </div>
                   </div>
+
+                  {/* Desktop Bundled Items Selection */}
+                  {(selectedCategory?.name?.toLowerCase().includes('desktop') || itemName.toLowerCase().includes('desktop')) && (
+                    <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 space-y-3 animate-in fade-in slide-in-from-top-1">
+                      <div className="flex items-center gap-2">
+                        <Package className="h-4 w-4 text-primary" />
+                        <Label className="font-bold text-sm text-primary">Desktop CPU Bundled Peripherals</Label>
+                      </div>
+                      <p className="text-xs text-muted-foreground">Select peripheral hardware items included with this Desktop CPU:</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                        <label className="flex items-center gap-2.5 p-3 rounded-lg border bg-background hover:bg-muted/40 cursor-pointer transition-colors text-sm font-medium">
+                          <Checkbox checked={bundleMouse} onCheckedChange={c => setBundleMouse(!!c)} />
+                          <span>Mouse</span>
+                        </label>
+                        <label className="flex items-center gap-2.5 p-3 rounded-lg border bg-background hover:bg-muted/40 cursor-pointer transition-colors text-sm font-medium">
+                          <Checkbox checked={bundleKeyboard} onCheckedChange={c => setBundleKeyboard(!!c)} />
+                          <span>Keyboard</span>
+                        </label>
+                        <label className="flex items-center gap-2.5 p-3 rounded-lg border bg-background hover:bg-muted/40 cursor-pointer transition-colors text-sm font-medium">
+                          <Checkbox checked={bundleMonitor} onCheckedChange={c => setBundleMonitor(!!c)} />
+                          <span>Monitor</span>
+                        </label>
+                      </div>
+                    </div>
+                  )}
+
                   {!isRegionalPerson && (
                     <div className="space-y-2">
                       <Label htmlFor="assigned">Assigned To <span className="text-muted-foreground font-normal">(Optional)</span></Label>
@@ -720,30 +808,7 @@ export default function AddAssetPage() {
                     </div>
                   )}
                 </>
-              )}
-
-              {selectedClassification === 'Consumable' && (
-                <>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <Label htmlFor="qty">Quantity <span className="text-destructive">*</span></Label>
-                      <Input id="qty" type="number" min={0} value={quantity} onChange={e => setQuantity(Math.max(0, parseInt(e.target.value) || 0))} />
-                      <p className="text-xs text-muted-foreground">Number of units currently in stock.</p>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="mss">Minimum Safety Stock</Label>
-                      <Input id="mss" type="number" min={0} value={minSafetyStock} onChange={e => setMinSafetyStock(Math.max(0, parseInt(e.target.value) || 0))} />
-                      <p className="text-xs text-muted-foreground">Alert threshold — reorder when stock drops below this.</p>
-                    </div>
-                  </div>
-                  <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl flex items-start gap-2.5 text-xs text-amber-700">
-                    <Info size={14} className="shrink-0 mt-0.5" />
-                    <div><p className="font-semibold mb-0.5">No Serial Tracking for Consumables</p>Consumables are tracked by quantity only. Individual serial numbers are not recorded.</div>
-                  </div>
-                </>
-              )}
-
-              {selectedClassification === 'Software' && (
+              ) : selectedClassification === 'Software' ? (
                 <>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
@@ -813,13 +878,15 @@ export default function AddAssetPage() {
                     <p>License keys and installer files are stored securely and visible only to authorized users.</p>
                   </div>
                 </>
-              )}
+              ) : null}
 
-              <div className="space-y-2 pt-2 border-t">
-                <Label htmlFor="notes">Notes / Remarks <span className="text-muted-foreground font-normal">(Optional)</span></Label>
-                <textarea id="notes" className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  placeholder="Any additional information..." value={notes} onChange={e => setNotes(e.target.value)} />
-              </div>
+              {!isSimplifiedItem && (
+                <div className="space-y-2 pt-2 border-t">
+                  <Label htmlFor="notes">Notes / Remarks <span className="text-muted-foreground font-normal">(Optional)</span></Label>
+                  <textarea id="notes" className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    placeholder="Any additional information..." value={notes} onChange={e => setNotes(e.target.value)} />
+                </div>
+              )}
             </div>
           )}
 
@@ -952,11 +1019,14 @@ export default function AddAssetPage() {
               <div className="rounded-xl border border-muted/50 overflow-hidden divide-y divide-muted/40">
                 {[
                   { label: 'Item Name', value: itemName },
-                  ...(selectedClassification !== 'Software' ? [{ label: 'Status', value: statusState }] : []),
+                  ...(selectedClassification !== 'Software' ? [{ label: 'Status / Condition', value: statusState }] : []),
                   ...(selectedClassification === 'Asset' ? [
                     { label: 'Serial Number', value: serialNumber || '—' },
-                    { label: 'RAM', value: ram || '—' },
-                    { label: 'Storage', value: [storageType, storageCapacity].filter(Boolean).join(' · ') || '—' },
+                    { label: 'RAM', value: ram || 'Standard' },
+                    { label: 'Storage', value: [storageType, storageCapacity].filter(Boolean).join(' · ') || 'Standard' },
+                    ...((selectedCategory?.name?.toLowerCase().includes('desktop') || itemName.toLowerCase().includes('desktop')) ? [
+                      { label: 'Bundled Peripherals', value: [bundleMouse && 'Mouse', bundleKeyboard && 'Keyboard', bundleMonitor && 'Monitor'].filter(Boolean).join(', ') || 'None' }
+                    ] : []),
                     ...(!isRegionalPerson ? [{ label: 'Assigned To', value: assignedTo || 'Unassigned' }] : []),
                   ] : []),
                   { label: 'Purchase Date', value: purchaseDate || 'Not specified' },
@@ -975,7 +1045,7 @@ export default function AddAssetPage() {
                   { label: 'Location', value: locationName || '—' },
                   ...(selectedClassification !== 'Software' && subLocationId && subLocationId !== 'none' && !isRegionalPerson ? [{ label: 'Department', value: subName }] : []),
                   ...(selectedClassification !== 'Software' && warehouseId && warehouseId !== 'none' && !isRegionalPerson ? [{ label: 'Warehouse', value: whName }] : []),
-                  ...(notes ? [{ label: 'Notes', value: notes }] : []),
+                  ...(notes ? [{ label: selectedClassification === 'Consumable' ? 'Description / Notes' : 'Notes', value: notes }] : []),
                 ].map(row => (
                   <div key={row.label} className="flex justify-between items-start px-4 py-2.5 hover:bg-muted/10 text-sm">
                     <span className="text-muted-foreground font-medium w-36 shrink-0">{row.label}</span>

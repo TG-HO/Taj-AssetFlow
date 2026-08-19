@@ -285,7 +285,8 @@ export default function OutOfOrderInventoryPage() {
 
       {/* Table */}
       <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
-        <Table>
+        <div className="overflow-x-auto w-full">
+          <Table className="min-w-[900px] w-full">
           <TableHeader>
             <TableRow className="bg-muted/50 hover:bg-muted/50">
               <TableHead className="w-[18%] font-semibold cursor-pointer select-none" onClick={() => handleSort('laptopName')}>
@@ -437,6 +438,7 @@ export default function OutOfOrderInventoryPage() {
             )}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       {/* Delete Confirmation */}

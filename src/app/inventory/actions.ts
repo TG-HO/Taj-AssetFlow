@@ -415,6 +415,21 @@ export async function deleteLocation(locationId: string) {
 
   const { data: oldLoc } = await supabase.from('locations').select('*').eq('id', locationId).single();
 
+  // Clean up any assigned_location_ids array in profiles
+  try {
+    const { data: allProfiles } = await supabase.from('profiles').select('id, assigned_location_ids');
+    if (allProfiles) {
+      for (const p of allProfiles) {
+        if (p.assigned_location_ids && Array.isArray(p.assigned_location_ids) && p.assigned_location_ids.includes(locationId)) {
+          const updated = p.assigned_location_ids.filter((id: string) => id !== locationId);
+          await supabase.from('profiles').update({ assigned_location_ids: updated }).eq('id', p.id);
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Error cleaning up assigned_location_ids in profiles:', e);
+  }
+
   const { error } = await supabase.from('locations').delete().eq('id', locationId);
   if (error) return { success: false, error: error.message };
 
@@ -422,6 +437,9 @@ export async function deleteLocation(locationId: string) {
     await writeAuditLog('DELETE_LOCATION', oldLoc.name, oldLoc, null);
   }
 
+  revalidatePath('/settings');
+  revalidatePath('/inventory');
+  revalidatePath('/stock-allocations');
   return { success: true };
 }
 

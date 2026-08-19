@@ -289,7 +289,8 @@ export default function FaultyInventoryPage() {
       </div>
 
       <div className="rounded-md border bg-card w-full overflow-hidden">
-        <Table className="table-fixed w-full">
+        <div className="overflow-x-auto w-full">
+          <Table className="table-fixed min-w-[950px] w-full">
           <TableHeader>
             <TableRow>
               <TableHead className="w-[12%] font-semibold">Serial Number</TableHead>
@@ -471,6 +472,7 @@ export default function FaultyInventoryPage() {
             )}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       <AlertDialog open={deleteItemId !== null} onOpenChange={(open) => { if (!open) setDeleteItemId(null); }}>

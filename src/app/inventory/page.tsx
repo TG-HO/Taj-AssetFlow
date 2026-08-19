@@ -339,13 +339,19 @@ export default function InventoryPage() {
   const filteredInventory = inventory
     .filter(item => !['Faulty', 'Snatched', 'Damaged'].includes(item.status))
     .filter(item => {
-      if (statusFilter !== 'All' && item.status !== statusFilter) return false;
+      if (statusFilter !== 'All') {
+        if (statusFilter === 'Refurbished' || statusFilter === 'Refub') {
+          if (item.status !== 'Refurbished' && item.status !== 'Refub') return false;
+        } else if (item.status !== statusFilter) {
+          return false;
+        }
+      }
       if (locationFilter !== 'All' && item.location !== locationFilter) return false;
       
       const searchLower = search.toLowerCase();
-      return item.serialNumber.toLowerCase().includes(searchLower) ||
-             item.laptopName.toLowerCase().includes(searchLower) ||
-             item.assignedTo.toLowerCase().includes(searchLower);
+      return (item.serialNumber || '').toLowerCase().includes(searchLower) ||
+             (item.laptopName || '').toLowerCase().includes(searchLower) ||
+             (item.assignedTo || '').toLowerCase().includes(searchLower);
     })
     .sort((a, b) => {
       if (durationSort !== 'None') {
@@ -379,7 +385,7 @@ export default function InventoryPage() {
           <h2 className="text-3xl font-bold tracking-tight text-primary">Inventory</h2>
           <p className="text-muted-foreground mt-1">Manage all IT assets in the Taj Gasoline organization.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <input 
             type="file" 
             accept=".csv" 
@@ -405,8 +411,8 @@ export default function InventoryPage() {
       <div className="flex items-center space-x-2">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search by Serial No, Laptop Name or User..."
+          <Input 
+            placeholder="Search by Serial No, Laptop Name or User..." 
             className="pl-8"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -415,7 +421,8 @@ export default function InventoryPage() {
       </div>
 
       <div className="rounded-md border bg-card w-full overflow-hidden">
-        <Table className="table-fixed w-full">
+        <div className="overflow-x-auto w-full">
+          <Table className="table-fixed min-w-[950px] w-full">
           <TableHeader>
             <TableRow>
               <TableHead className="w-[12%] font-semibold">Serial Number</TableHead>
@@ -507,8 +514,8 @@ export default function InventoryPage() {
                   <SelectContent>
                     <SelectItem value="All">All Statuses</SelectItem>
                     <SelectItem value="New">New</SelectItem>
+                    <SelectItem value="Refurbished">Refurbished</SelectItem>
                     <SelectItem value="Used">Used</SelectItem>
-                    <SelectItem value="Refub">Refurbished</SelectItem>
                   </SelectContent>
                 </Select>
               </TableHead>
@@ -568,10 +575,14 @@ export default function InventoryPage() {
                   </TableCell>
                   <TableCell>
                     <Badge variant={
-                      item.status === 'Faulty' ? 'destructive' : 
+                      ['Faulty', 'Damaged', 'Dead', 'Snatched'].includes(item.status) ? 'destructive' : 
                       item.status === 'New' ? 'default' : 
+                      item.status === 'Refurbished' || item.status === 'Refub' ? 'outline' :
                       'secondary'
-                    }>
+                    } className={cn(
+                      "text-xs",
+                      (item.status === 'Refurbished' || item.status === 'Refub') && "bg-cyan-50 text-cyan-800 border-cyan-300 font-semibold"
+                    )}>
                       {item.status}
                     </Badge>
                   </TableCell>
@@ -642,6 +653,7 @@ export default function InventoryPage() {
             )}
           </TableBody>
         </Table>
+        </div>
       </div>
       </div>
 

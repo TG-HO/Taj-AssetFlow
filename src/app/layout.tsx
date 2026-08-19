@@ -57,8 +57,8 @@ export default async function RootLayout({
         <TenantSessionProvider>
           <ToastProvider />
           {!isLoginPage && <Sidebar userRole={session?.role} />}
-          <main className={`flex-1 min-h-screen bg-muted/20 ${!isLoginPage ? 'ml-64 max-w-[calc(100vw-16rem)]' : 'w-full max-w-[100vw]'} overflow-x-hidden`}>
-            <div className="p-4 sm:p-8 w-full max-w-7xl mx-auto">
+          <main className={`flex-1 min-h-screen bg-muted/20 ${!isLoginPage ? 'lg:ml-64 lg:max-w-[calc(100vw-16rem)] pt-16 lg:pt-0 w-full max-w-full' : 'w-full max-w-[100vw]'} overflow-x-hidden transition-all duration-300`}>
+            <div className="p-3 sm:p-6 lg:p-8 w-full max-w-7xl mx-auto">
               {children}
             </div>
           </main>

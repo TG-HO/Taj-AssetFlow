@@ -222,7 +222,8 @@ export default function StockAllocationsPage() {
                 <p className="text-xs">Incoming and outgoing stock transfers will show up here.</p>
               </div>
             ) : (
-              <Table>
+              <div className="overflow-x-auto w-full">
+                <Table className="min-w-[650px] w-full">
                 <TableHeader>
                   <TableRow className="hover:bg-transparent bg-muted/10">
                     <TableHead className="font-semibold text-foreground py-3">Item details</TableHead>
@@ -264,9 +265,9 @@ export default function StockAllocationsPage() {
                             <CheckCircle2 size={11} /> Reconciled
                           </Badge>
                         )}
-                        {item.status === 'Mismatch' && (
-                          <Badge variant="outline" className="bg-destructive/10 text-destructive border-destructive/25 gap-1 font-semibold animate-pulse">
-                            <AlertTriangle size={11} /> Mismatch
+                        {item.status === 'Discrepancy' && (
+                          <Badge variant="outline" className="bg-rose-50 text-rose-600 border-rose-200 gap-1 font-semibold">
+                            <AlertTriangle size={11} /> Discrepancy
                           </Badge>
                         )}
                       </TableCell>
@@ -291,6 +292,7 @@ export default function StockAllocationsPage() {
                   ))}
                 </TableBody>
               </Table>
+              </div>
             )}
           </CardContent>
         </Card>
